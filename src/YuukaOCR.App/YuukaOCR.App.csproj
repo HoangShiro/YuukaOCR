@@ -18,6 +18,11 @@
     <ProjectReference Include="..\YuukaOCR.Core\YuukaOCR.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <!-- The layout harness asserts what the agent is about to be told (the pinned selection, not the
+         live highlight), which needs one internal method rather than a public test-only API. -->
+    <InternalsVisibleTo Include="YuukaXamlCheck" />
+  </ItemGroup>
+  <ItemGroup>
     <None Update="Assets\ui.png" CopyToOutputDirectory="PreserveNewest" />
     <!-- Embedded so every window can use pack://application:,,,/Assets/app-icon.png as its title-bar
          and taskbar icon. The master artwork is deliberately not an item: it never ships. -->

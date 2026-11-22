@@ -9,6 +9,7 @@ using YuukaOCR.App.Ui;
 using YuukaOCR.App.Ui.Controls;
 using YuukaOCR.App.Ui.Tabs;
 using YuukaOCR.Core.Agent;
+using YuukaOCR.Core.Localization;
 using YuukaOCR.Core.Settings;
 
 namespace XamlCheck;
@@ -32,6 +33,7 @@ internal static class LayoutProbe
         SliderGeometry();
         SnappingTicks();
         SelectionPopupLifetime(services);
+        SelectionContext(services);
         InputClipping(services);
         TickInk();
         ThemeContrast();
@@ -323,6 +325,133 @@ internal static class LayoutProbe
             RoutedEvent = UIElement.PreviewMouseLeftButtonDownEvent,
             Source = source
         });
+
+    /// <summary>
+    /// The agent's context must survive the user typing the question somewhere else. Selecting text and
+    /// clicking into the chat box used to lose it: the live highlight went away, `SelectedText` followed,
+    /// and the request silently fell back to the whole OCR result. The selection is pinned now, and the
+    /// highlight stays painted so the user can still see what will be sent.
+    /// </summary>
+    private static void SelectionContext(AppServices services)
+    {
+        var result = new ResultWindow(services);
+
+        try
+        {
+            const string body = "Yuuka reads the text inside the selection.";
+            result.ShowText(body, null, activate: false);
+
+            if (result.FindName("ResultBox") is not TextBox box || result.FindName("ChatBox") is not TextBox chat)
+            {
+                Fail("selection context: ResultBox/ChatBox not found");
+                return;
+            }
+
+            var scope = result.FindName("ScopeText") as TextBlock;
+            var checks = new List<string>();
+
+            box.Select(0, 5);
+            checks.Add($"pinned:{result.CurrentContext().Text == "Yuuka"}");
+
+            // The reported flow: pick a sentence, then click into the chat box to type the question.
+            Keyboard.Focus(box);
+            Pump();
+            Keyboard.Focus(chat);
+            Pump();
+
+            checks.Add($"focus-moved-keeps-selection:{box.SelectionLength == 5}");
+            checks.Add($"focus-moved-keeps-context:{result.CurrentContext().Text == "Yuuka"}");
+            checks.Add($"focus-moved-keeps-chip:{scope?.Text == L.T("result.context.selection")}");
+
+            // The highlight must still be painted while the chat box has the focus, or the user cannot
+            // see what the request is about. Measured in pixels, not from the property.
+            checks.Add($"highlight-still-painted:{HighlightInk(box) > 0}");
+
+            // Even if the live highlight goes away entirely, the pinned copy is what gets sent.
+            box.Select(0, 0);
+            checks.Add($"highlight-lost-keeps-context:{result.CurrentContext().Text == "Yuuka"}");
+
+            // Dropping the selection on purpose (box focused) is still a scope reset.
+            Keyboard.Focus(box);
+            Pump();
+            box.Select(0, 5);
+            box.Select(0, 0);
+            checks.Add($"dropped-on-purpose-resets:{result.CurrentContext().Text == body}");
+            checks.Add($"dropped-on-purpose-chip:{scope?.Text == L.T("result.context.all")}");
+
+            // A new result starts clean.
+            box.Select(0, 5);
+            result.ShowText(body, null, activate: false);
+            checks.Add($"new-result-resets:{result.CurrentContext().Text == body}");
+
+            checks.Add($"inactive-highlight:{box.IsInactiveSelectionHighlightEnabled}");
+
+            var failures = checks.Where(c => c.EndsWith(":False", StringComparison.Ordinal)).ToList();
+            if (failures.Count > 0)
+                Fail($"selection context: {string.Join(", ", failures)}");
+            else
+                Pass($"selection context survives focus moving to the chat box ({checks.Count} checks)");
+        }
+        catch (Exception ex)
+        {
+            Fail($"selection context: {ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            result.Close();
+        }
+    }
+
+    /// <summary>
+    /// Pixels that change when the box's selection is dropped — i.e. the highlight the user sees.
+    ///
+    /// Compared as two renderings instead of matching the accent colour: WPF paints a selection at
+    /// <see cref="TextBoxBase.SelectionOpacity"/> (40 % by default), so the pixels are a blend of the
+    /// brush and whatever is behind it, and a colour match finds nothing even when the highlight is
+    /// right there. A differential cannot miss it and does not care about the theme.
+    /// </summary>
+    private static int HighlightInk(TextBox box)
+    {
+        var withSelection = Snapshot(box);
+        var start = box.SelectionStart;
+        var length = box.SelectionLength;
+
+        box.Select(0, 0);
+        var without = Snapshot(box);
+        box.Select(start, length);
+
+        if (withSelection.Length != without.Length) return -1;
+
+        var changed = 0;
+        for (var i = 0; i < withSelection.Length; i++)
+            if (withSelection[i] != without[i]) changed++;
+        return changed;
+    }
+
+    /// <summary>
+    /// An element's own pixels as BGRA bytes, rendered at its own size. Through a
+    /// <see cref="VisualBrush"/>: a direct <c>RenderTargetBitmap.Render(element)</c> bakes in the
+    /// element's layout offset and paints outside a bitmap sized to the element.
+    /// </summary>
+    private static byte[] Snapshot(FrameworkElement element)
+    {
+        element.UpdateLayout();
+        var width = (int)Math.Ceiling(element.ActualWidth);
+        var height = (int)Math.Ceiling(element.ActualHeight);
+        if (width <= 0 || height <= 0) return Array.Empty<byte>();
+
+        var visual = new DrawingVisual();
+        using (var dc = visual.RenderOpen())
+            dc.DrawRectangle(new VisualBrush(element), null, new Rect(0, 0, width, height));
+
+        var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(visual);
+
+        var stride = width * 4;
+        var buffer = new byte[stride * height];
+        bitmap.CopyPixels(buffer, stride, 0);
+        return buffer;
+    }
 
     /// <summary>
     /// An input that got less height than it asked for clips its text — that is exactly what a hard-coded

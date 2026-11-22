@@ -66,6 +66,7 @@
             <ScrollViewer Grid.Row="1" Grid.Column="0" MaxHeight="380" Margin="0,7,4,0"
                           VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <TextBox x:Name="ResultBox" IsReadOnly="True" IsReadOnlyCaretVisible="False"
+                         IsInactiveSelectionHighlightEnabled="True"
                          TextWrapping="Wrap" BorderThickness="0" Padding="0" Background="Transparent"
                          Foreground="{DynamicResource YuukaText}"
                          FontFamily="{DynamicResource YuukaFontFamily}"

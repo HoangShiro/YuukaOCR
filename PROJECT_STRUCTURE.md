@@ -148,7 +148,7 @@ reopens it on the tab the user was on) instead of re-binding every label.
 | `Ui/Theme.cs` | Applies the active palette to a window's `Resources` (`YuukaBg`, `YuukaPanel`, `YuukaPanelHover`, `YuukaBorder`, `YuukaText`, `YuukaSubtle`, `YuukaAccent`, `YuukaOnAccent`, `YuukaDanger`, `YuukaBarBg`, `YuukaBarText`, `YuukaFontFamily`, `YuukaFontSize`). Every window calls it on construction and again on `Settings.Changed`, which is what makes a preset switch repaint the bar, the bubble *and* the settings window at once. |
 | `Ui/Localization/TrExtension.cs` | `{ui:Tr key}` markup extension → `L.T(key)`. |
 | `Ui/MainWindow.xaml(.cs)` | The bar: dragging, physics, hooking, hotkey, clipboard, drop, open settings, quit. Owns the result window, so it also serves the Layout *Test* preview (`ShowResultPreview`, shown without focus) and `PromptForKey`, the entry point for the startup key check. |
-| `Ui/ResultWindow.xaml(.cs)` | Result bubble: placed by D-pad + spacing, flies out on the spring, drag to move. The text is a read-only selectable `TextBox`; a selection opens a floating icon-only copy button (and switches the chat scope to the selection), and the icon-only copy button under *close* copies everything. The borderless action bar at the bottom holds the registered action buttons (icon-only, ≤10, horizontally scrollable) plus the context label, chat box and send button, all on one row. `ShowText(text, barBounds, activate)` — `activate: false` is the preview, so the bubble cannot steal focus from the settings window. Implements `IThemedWindow`. |
+| `Ui/ResultWindow.xaml(.cs)` | Result bubble: placed by D-pad + spacing, flies out on the spring, drag to move. The text is a read-only selectable `TextBox`; a selection opens a floating icon-only copy button (and pins the chat scope to that text), and the icon-only copy button under *close* copies everything. The borderless action bar at the bottom holds the registered action buttons (icon-only, ≤10, horizontally scrollable) plus the context label, chat box and send button, all on one row. `ShowText(text, barBounds, activate)` — `activate: false` is the preview, so the bubble cannot steal focus from the settings window. Implements `IThemedWindow`. |
 | `Ui/FullTextWindow.xaml(.cs)` | **Full Text Edit Mode** — the one expanded-text surface. `Show(services, titleKey, text, readOnly)` returns the edited text or `null` for *Back*; *Done* is hidden in read-only mode. Owned by the settings window it covers that window's bounds, otherwise it centres on the work area. Borderless chrome with the same 22 DIP shadow padding as the bubble. |
 | `Ui/Controls/PromptTools.xaml(.cs)` | The expand/reset pair attached to every prompt field: `Initialize(services, box, titleKey, defaultText)` — expand opens `FullTextWindow`, reset restores the shipped default (the button is disabled when the field has no shipped default). Raises `Committed` because assigning `TextBox.Text` programmatically never fires `LostFocus`, which is what the tab used to save on. |
 | `Ui/SnipOverlay.xaml(.cs)` | Screen region selection, returns a physical-pixel `ScreenRect`. |
@@ -371,6 +371,13 @@ sequenceDiagram
     repeat the transparency in their 1-bit AND mask. The master stays an untouched square tile, so
     re-running the script is always enough to rebuild the look; never bake white corners into a new
     master to fake it.
+32. **What the agent is told is pinned when the user picks it, never read live at send time** —
+    `ResultWindow` keeps `_pinnedSelection` and `CurrentContext()` reads that, not
+    `ResultBox.SelectedText`. The user selects a sentence, then clicks into the chat box to type the
+    question; anything that clears the highlight in between (a click in the result, a re-layout) used
+    to swap the request's subject to the whole OCR result without a word. `IsInactiveSelectionHighlightEnabled`
+    keeps the highlight painted after focus moves, and the scope only resets when the box *has* focus
+    (`IsKeyboardFocusWithin`) or a new result arrives.
 
 ---
 

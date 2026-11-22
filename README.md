@@ -134,7 +134,11 @@ To copy the app to another machine with nothing installed: `pwsh ./build.ps1 -Se
 * **The action bar** along the bottom holds your registered action buttons (icon-only, up to 10) and
   a chat box. Chat and actions use either the **whole result** or **just the selected text** — a
   selection switches the scope automatically, and the little label next to the input shows which one
-  is active.
+  is active. The selection is *pinned* the moment you make it: clicking into the chat box to type the
+  question keeps it, the highlight stays painted (dimmed, because the text box no longer has focus)
+  and the label still reads *Selected text*, so what the agent is told cannot change between
+  selecting and pressing Enter. The scope drops back to the whole result only when you clear the
+  selection yourself or a new OCR result arrives.
 * Actions are predefined quick-chat turns: each one sends the global *Agent instruction* plus its own
   *Action instruction* plus the context, through the **same conversation** as the chat box, so "and
   in Vietnamese?" works right after "summarize this".

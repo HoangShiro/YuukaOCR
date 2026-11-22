@@ -49,6 +49,18 @@ public partial class ResultWindow : Window, IThemedWindow
     /// <summary>True when the next request carries the selected text instead of the whole result.</summary>
     private bool _useSelection;
 
+    /// <summary>
+    /// The text the user picked, kept independently of <see cref="TextBox.SelectedText"/>.
+    ///
+    /// Reading the live selection at send time was a context leak: the user highlights a sentence,
+    /// clicks into the chat box to type the question, and anything that drops the highlight — a click
+    /// in the result, a re-layout, the window losing focus on some Windows versions — takes the agent's
+    /// context with it, silently falling back to the whole OCR result. The selection is pinned when it
+    /// is made and only released when the user drops it on purpose (with the box focused) or a new
+    /// result arrives.
+    /// </summary>
+    private string? _pinnedSelection;
+
     /// <summary>True while the chat box still shows the placeholder rather than typed text.</summary>
     private bool _placeholderShown = true;
 
@@ -161,6 +173,7 @@ public partial class ResultWindow : Window, IThemedWindow
 
         // A new result starts a fresh scope, but the conversation itself is shared and persistent.
         _useSelection = false;
+        _pinnedSelection = null;
         ScopeText.Text = L.T("result.context.all");
         _chatStart = _services.Agent.History.Count;
 
@@ -296,10 +309,14 @@ public partial class ResultWindow : Window, IThemedWindow
         if (ResultBox.SelectionLength <= 0)
         {
             SelectionPopup.IsOpen = false;
-            // Dropping the selection puts the chat back on the whole result — the common case.
-            if (_useSelection)
+
+            // Dropping the selection puts the chat back on the whole result — but only when the user
+            // did it: with the box focused. A box that merely lost focus must keep what it had, or
+            // clicking into the chat box would throw the agent's context away.
+            if (_useSelection && ResultBox.IsKeyboardFocusWithin)
             {
                 _useSelection = false;
+                _pinnedSelection = null;
                 ScopeText.Text = L.T("result.context.all");
             }
             return;
@@ -316,7 +333,10 @@ public partial class ResultWindow : Window, IThemedWindow
         SelectionPopup.VerticalOffset = Math.Max(0, end.Bottom + 2);
         SelectionPopup.IsOpen = true;
 
-        // A selection is a statement of intent: the next message is about it.
+        // A selection is a statement of intent: the next message is about it. Pin the text now, so the
+        // question can be typed in the chat box without the context depending on the highlight still
+        // being there when Enter is pressed.
+        _pinnedSelection = ResultBox.SelectedText;
         if (!_useSelection)
         {
             _useSelection = true;
@@ -357,6 +377,7 @@ public partial class ResultWindow : Window, IThemedWindow
     private void OnScopeClick(object sender, RoutedEventArgs e)
     {
         _useSelection = !_useSelection && ResultBox.SelectionLength > 0;
+        if (_useSelection) _pinnedSelection = ResultBox.SelectedText;
         ScopeText.Text = L.T(_useSelection ? "result.context.selection" : "result.context.all");
     }
 
@@ -469,14 +490,14 @@ public partial class ResultWindow : Window, IThemedWindow
     }
 
     /// <summary>
-    /// What the next request is about: the selection when the user picked one, the whole OCR result
-    /// otherwise.
+    /// What the next request is about: the pinned selection when the user picked one, the whole OCR
+    /// result otherwise. It reads the pinned copy, never the live highlight, so typing the question in
+    /// the chat box cannot change the answer's subject.
     /// </summary>
-    private (string? Text, string Label) CurrentContext()
+    internal (string? Text, string Label) CurrentContext()
     {
-        var selected = ResultBox.SelectedText;
-        if (_useSelection && !string.IsNullOrWhiteSpace(selected))
-            return (selected, L.T("result.context.selection"));
+        if (_useSelection && !string.IsNullOrWhiteSpace(_pinnedSelection))
+            return (_pinnedSelection, L.T("result.context.selection"));
 
         var whole = ResultBox.Text;
         return string.IsNullOrWhiteSpace(whole)

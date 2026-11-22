@@ -369,14 +369,17 @@ ran (CLI, logs — no GUI interaction, as required).
 | 9 | History expand opens read-only Full Text Edit Mode | `LogTab` expand icon → `FullTextWindow.ShowFor(..., readOnly: true)` | `xamlcheck` builds the History rows (`outputs=5`, `prompts=0`, `chat=0`) |
 | 10 | GitHub update check on start, compare versions, Update section, graceful failures | `Update/AppVersion.cs`, `Update/GitHubUpdateService.cs`, System tab Update section, `App.xaml.cs` background check | tests for tag parsing, release interpretation, remote parsing and the installer script; live run of the published exe logged `[update] The repository is private: add GITHUB_TOKEN to user/.env to read its releases.` and kept starting normally |
 | 11 | No dev/debug API logs in a production build, no secrets in logs | `ApiTrace` is opt-in (`YUUKA_API_DEBUG=1`), `build.ps1` deletes trace files before publishing | publish tree contains no `api-debug.log`; the token is read through `ApiKeyPool.ReadValue` and never logged |
-| 12 | Docs updated | `README.md` (icon, full text, presets, updates, 90 %), `PROJECT_STRUCTURE.md` (new sections 10–12, file tables, conventions 26–29) | this file |
+| 12 | Docs updated | `README.md` (icon, full text, presets, updates, 90 %), `PROJECT_STRUCTURE.md` (new sections 10–12, file tables, conventions 26–32) | this file |
+| 13 | Fixed: the floating copy button outlived the selection | `SelectionCopy.Track(box, popup)` — focus loss, window deactivation/hide, click-away | `xamlcheck` probe `selection copy button closes on click-away, click-inside-kept, cleared, focus-lost, window-hidden` |
+| 14 | Fixed: clicking into the chat box lost the agent's context | `ResultWindow._pinnedSelection` + `CurrentContext()` reading it; `IsInactiveSelectionHighlightEnabled` keeps the highlight painted | `xamlcheck` probe `selection context survives focus moving to the chat box` (9 checks, including the live-highlight-lost case); it fails on the previous live-read code |
+| 15 | Fixed: the app icon was a hard white square | `tools/makeicon.py` 20 % rounded mask, RGBA, AND mask in the DIB entries | `makeicon.py --check`; corner alpha 0 in all 10 ICO entries and in `ExtractAssociatedIcon` of the published exe |
 
 ### Verification (CLI only)
 
 ```
 dotnet build YuukaOCR.slnx -c Release                     Build succeeded, 0 warnings, 0 errors
 dotnet run --project tests/YuukaOCR.Tests -c Release       52/52 passed
-dotnet run --project tools/xamlcheck -c Release            12 windows/tabs + 13 probes, all passed
+dotnet run --project tools/xamlcheck -c Release            12 windows/tabs + 26 probes, all passed
 dotnet publish ... -r win-x64 -o publish                   YuukaOCR.exe 341,504 B, version 2.1.0.0
 ```
 
