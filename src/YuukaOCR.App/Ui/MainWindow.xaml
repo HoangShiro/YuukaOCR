@@ -1,0 +1,67 @@
+﻿<Window x:Class="YuukaOCR.App.Ui.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="clr-namespace:YuukaOCR.App.Ui.Localization"
+        Title="YuukaOCR" Width="200" Height="50"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        ResizeMode="NoResize" ShowInTaskbar="False" Topmost="True"
+        SnapsToDevicePixels="True" UseLayoutRounding="True"
+        AllowDrop="True" ShowActivated="False">
+
+    <Window.Resources>
+        <Style x:Key="BarButton" TargetType="Button">
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Pill" CornerRadius="9" Background="{TemplateBinding Background}" />
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Pill" Property="Opacity" Value="0.78" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Pill" Property="Opacity" Value="0.55" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Border x:Name="BarBorder" CornerRadius="24" Background="{DynamicResource YuukaBarBg}"
+                MouseLeftButtonDown="OnBarMouseDown" MouseMove="OnBarMouseMove"
+                MouseLeftButtonUp="OnBarMouseUp" MouseRightButtonUp="OnBarRightClick">
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="14" ShadowDepth="2" Opacity="0.35" Color="Black" />
+            </Border.Effect>
+            <Grid ClipToBounds="True">
+                <Image x:Name="BarImage" Stretch="Fill" Visibility="Collapsed"
+                       RenderOptions.BitmapScalingMode="HighQuality" />
+
+                <Grid Margin="15,0,9,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock x:Name="StatusLabel" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" Text="{ui:Tr bar.idle}"
+                               Foreground="{DynamicResource YuukaBarText}"
+                               FontFamily="{DynamicResource YuukaFontFamily}"
+                               FontSize="{DynamicResource YuukaFontSize}"
+                               IsHitTestVisible="False" />
+
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button x:Name="ConfigButton" Style="{StaticResource BarButton}" Width="34" Height="18"
+                                Margin="0,0,6,0" ToolTip="{ui:Tr bar.tooltip.config}" Click="OnConfigClick" />
+                        <Button x:Name="CloseButton" Style="{StaticResource BarButton}" Width="34" Height="18"
+                                ToolTip="{ui:Tr bar.tooltip.close}" Click="OnCloseClick" />
+                    </StackPanel>
+                </Grid>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

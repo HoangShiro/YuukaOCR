@@ -1,0 +1,156 @@
+<UserControl x:Class="YuukaOCR.App.Ui.Tabs.PromptAgentTab"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="clr-namespace:YuukaOCR.App.Ui.Localization"
+             xmlns:controls="clr-namespace:YuukaOCR.App.Ui.Controls">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="4,2,10,10">
+
+            <!-- ============================================================ OCR -->
+            <TextBlock Text="{ui:Tr agent.section.ocr}" Style="{StaticResource YuukaHeaderText}" />
+            <Separator />
+            <TextBlock Text="{ui:Tr agent.ocr.prompt}" Style="{StaticResource YuukaFieldLabel}" />
+            <TextBlock Text="{ui:Tr agent.ocr.hint}" Style="{StaticResource YuukaSubtleText}"
+                       TextWrapping="Wrap" Margin="0,0,0,5" />
+            <CheckBox x:Name="PromptEnabledBox" Content="{ui:Tr sys.prompt.enabled}"
+                      Checked="OnPromptEnabled" Unchecked="OnPromptEnabled" Margin="0,0,0,6" />
+            <TextBox x:Name="PromptBox" Height="88" AcceptsReturn="True" TextWrapping="Wrap"
+                     VerticalScrollBarVisibility="Auto" LostFocus="OnPromptLostFocus" />
+
+            <!-- ========================================================== Agent -->
+            <TextBlock Text="{ui:Tr agent.section.agent}" Style="{StaticResource YuukaHeaderText}"
+                       Margin="0,14,0,0" />
+            <Separator />
+
+            <TextBlock Text="{ui:Tr agent.instruction}" Style="{StaticResource YuukaFieldLabel}" />
+            <TextBlock Text="{ui:Tr agent.instruction.hint}" Style="{StaticResource YuukaSubtleText}"
+                       TextWrapping="Wrap" Margin="0,0,0,5" />
+            <TextBox x:Name="InstructionBox" Height="86" AcceptsReturn="True" TextWrapping="Wrap"
+                     VerticalScrollBarVisibility="Auto" LostFocus="OnInstructionLostFocus" />
+
+            <!-- provider + model on one row -->
+            <Grid Margin="0,10,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                    <TextBlock Text="{ui:Tr agent.provider}" Style="{StaticResource YuukaFieldLabel}" />
+                    <ComboBox x:Name="ProviderBox" SelectionChanged="OnProviderChanged" />
+                </StackPanel>
+
+                <StackPanel Grid.Column="1">
+                    <TextBlock Text="{ui:Tr agent.model}" Style="{StaticResource YuukaFieldLabel}" />
+                    <controls:ModelPicker x:Name="AgentModelPicker" />
+                </StackPanel>
+            </Grid>
+
+            <!-- temperature + token budget on one row -->
+            <Grid Margin="0,8,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                    <Grid>
+                        <TextBlock Text="{ui:Tr agent.temperature}" Style="{StaticResource YuukaFieldLabel}"
+                                   HorizontalAlignment="Left" />
+                        <TextBlock x:Name="TemperatureValue" Style="{StaticResource YuukaSubtleText}"
+                                   HorizontalAlignment="Right" />
+                    </Grid>
+                    <Slider x:Name="TemperatureSlider" Minimum="0" Maximum="2" TickFrequency="0.25"
+                            SmallChange="0.25" LargeChange="0.25" ValueChanged="OnTemperatureChanged" />
+                </StackPanel>
+
+                <StackPanel Grid.Column="1">
+                    <Grid>
+                        <TextBlock Text="{ui:Tr agent.tokens}" Style="{StaticResource YuukaFieldLabel}"
+                                   HorizontalAlignment="Left" />
+                        <TextBlock x:Name="TokensValue" Style="{StaticResource YuukaSubtleText}"
+                                   HorizontalAlignment="Right" />
+                    </Grid>
+                    <Slider x:Name="TokensSlider" Minimum="0" Maximum="32000" TickFrequency="4000"
+                            SmallChange="4000" LargeChange="4000" ValueChanged="OnTokensChanged" />
+                </StackPanel>
+            </Grid>
+            <TextBlock Text="{ui:Tr agent.tokens.hint}" Style="{StaticResource YuukaSubtleText}"
+                       TextWrapping="Wrap" Margin="0,0,0,2" />
+
+            <!-- ======================================================== Actions -->
+            <Grid Margin="0,16,0,0">
+                <TextBlock Text="{ui:Tr agent.section.actions}" Style="{StaticResource YuukaHeaderText}"
+                           VerticalAlignment="Center" />
+                <TextBlock x:Name="ActionCount" Style="{StaticResource YuukaSubtleText}"
+                           HorizontalAlignment="Right" VerticalAlignment="Center" />
+            </Grid>
+            <Separator />
+            <TextBlock Text="{ui:Tr agent.actions.hint}" Style="{StaticResource YuukaSubtleText}"
+                       TextWrapping="Wrap" Margin="0,0,0,6" />
+
+            <!-- browser-style tab strip: one tab per action, plus a "+" at the end -->
+            <Border Background="{DynamicResource YuukaPanel}" CornerRadius="8" Padding="4,4,4,0">
+                <StackPanel Orientation="Horizontal">
+                    <ScrollViewer HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled"
+                                  MaxWidth="620">
+                        <StackPanel x:Name="ActionTabs" Orientation="Horizontal" />
+                    </ScrollViewer>
+                    <Button x:Name="NewActionButton" Width="26" Height="26" Margin="4,0,0,4" Cursor="Hand"
+                            Click="OnNewAction" ToolTip="{ui:Tr agent.action.new}"
+                            Style="{StaticResource YuukaIconButton}">
+                        <Path Data="{StaticResource IconPlus}" Stroke="{DynamicResource YuukaText}"
+                              StrokeThickness="1.4" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              Stretch="Uniform" Width="12" Height="12" />
+                    </Button>
+                </StackPanel>
+            </Border>
+
+            <!-- editor for the selected action -->
+            <Border x:Name="ActionEditor" Background="{DynamicResource YuukaPanel}" CornerRadius="0,8,8,8"
+                    Padding="12,10" Margin="0,0,0,4" Visibility="Collapsed">
+                <StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                            <TextBlock Text="{ui:Tr agent.action.name}" Style="{StaticResource YuukaFieldLabel}" />
+                            <!--
+                                No Height: the theme font size drives the line box, and a hard-coded 26 DIP
+                                left too little room for it (the text was clipped along the bottom). The box
+                                now measures itself and the row aligns it with the delete button.
+                            -->
+                            <TextBox x:Name="ActionNameBox" MinHeight="26" Padding="8,4"
+                                     VerticalAlignment="Center" VerticalContentAlignment="Center"
+                                     LostFocus="OnActionNameLostFocus" />
+                        </StackPanel>
+
+                        <Button Grid.Column="1" x:Name="DeleteActionButton" Width="28" Height="28"
+                                VerticalAlignment="Bottom" Cursor="Hand" Click="OnDeleteAction"
+                                ToolTip="{ui:Tr agent.action.delete}"
+                                Style="{StaticResource YuukaIconButton}">
+                            <Path Data="{StaticResource IconRemove}" Stroke="{DynamicResource YuukaDanger}"
+                                  StrokeThickness="1.4" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                  StrokeLineJoin="Round" Stretch="Uniform" Width="14" Height="14" />
+                        </Button>
+                    </Grid>
+
+                    <TextBlock Text="{ui:Tr agent.action.icon}" Style="{StaticResource YuukaFieldLabel}"
+                               Margin="0,8,0,4" />
+                    <WrapPanel x:Name="IconPicker" Orientation="Horizontal" />
+
+                    <TextBlock Text="{ui:Tr agent.action.instruction}" Style="{StaticResource YuukaFieldLabel}"
+                               Margin="0,10,0,4" />
+                    <TextBox x:Name="ActionInstructionBox" Height="96" AcceptsReturn="True" TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Auto" LostFocus="OnActionInstructionLostFocus" />
+                </StackPanel>
+            </Border>
+
+            <TextBlock x:Name="EmptyHint" Text="{ui:Tr agent.actions.none}" Style="{StaticResource YuukaSubtleText}"
+                       TextWrapping="Wrap" Margin="0,6,0,0" Visibility="Collapsed" />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

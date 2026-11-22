@@ -1,0 +1,10 @@
+bin/
+obj/
+*.user
+*.suo
+.vs/
+user/
+publish/
+TestResults/
+*.log
+BUG.md

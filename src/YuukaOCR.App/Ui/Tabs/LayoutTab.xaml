@@ -1,0 +1,113 @@
+﻿<UserControl x:Class="YuukaOCR.App.Ui.Tabs.LayoutTab"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="clr-namespace:YuukaOCR.App.Ui.Localization">
+    <UserControl.Resources>
+        <Style x:Key="DirButton" TargetType="RadioButton">
+            <Setter Property="Foreground" Value="{DynamicResource YuukaText}" />
+            <Setter Property="FontFamily" Value="{DynamicResource YuukaFontFamily}" />
+            <Setter Property="FontSize" Value="{DynamicResource YuukaFontSize}" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="Root" CornerRadius="8" Background="{DynamicResource YuukaPanel}"
+                                BorderBrush="{DynamicResource YuukaBorder}" BorderThickness="1">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource YuukaAccent}" />
+                                <Setter Property="Foreground" Value="#FF1A1A1A" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource YuukaAccent}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,8,0">
+        <StackPanel>
+            <TextBlock Text="{ui:Tr layout.position}" Style="{StaticResource YuukaHeaderText}" />
+            <TextBlock Style="{StaticResource YuukaSubtleText}" TextWrapping="Wrap"
+                       Text="{ui:Tr layout.position.hint}" />
+
+            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                <Grid Width="220" Height="150" HorizontalAlignment="Left">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <RadioButton x:Name="TopButton" Grid.Row="0" Grid.Column="1" GroupName="SubPos" Content="{ui:Tr layout.top}"
+                                 Style="{StaticResource DirButton}" Margin="3" Checked="OnPositionChecked" />
+                    <RadioButton x:Name="LeftButton" Grid.Row="1" Grid.Column="0" GroupName="SubPos" Content="{ui:Tr layout.left}"
+                                 Style="{StaticResource DirButton}" Margin="3" Checked="OnPositionChecked" />
+                    <RadioButton x:Name="AutoButton" Grid.Row="1" Grid.Column="1" GroupName="SubPos" Content="{ui:Tr layout.auto}"
+                                 Style="{StaticResource DirButton}" Margin="3" Checked="OnPositionChecked" />
+                    <RadioButton x:Name="RightButton" Grid.Row="1" Grid.Column="2" GroupName="SubPos" Content="{ui:Tr layout.right}"
+                                 Style="{StaticResource DirButton}" Margin="3" Checked="OnPositionChecked" />
+                    <RadioButton x:Name="BottomButton" Grid.Row="2" Grid.Column="1" GroupName="SubPos" Content="{ui:Tr layout.bottom}"
+                                 Style="{StaticResource DirButton}" Margin="3" Checked="OnPositionChecked" />
+                </Grid>
+
+                <!-- Right of the D-pad: shows the real result bubble where the current choice puts it. -->
+                <Button x:Name="TestButton" Content="{ui:Tr layout.test}" Click="OnTestPosition"
+                        Style="{StaticResource YuukaButton}" VerticalAlignment="Center"
+                        MinWidth="90" Margin="14,0,0,0" />
+            </StackPanel>
+
+            <TextBlock Style="{StaticResource YuukaSubtleText}" TextWrapping="Wrap" Margin="0,8,0,0"
+                       Text="{ui:Tr layout.test.hint}" />
+
+            <Separator />
+
+            <TextBlock Text="{ui:Tr layout.spacingSize}" Style="{StaticResource YuukaHeaderText}" />
+
+            <Grid Margin="0,0,0,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="170" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="46" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{ui:Tr layout.spacing}" VerticalAlignment="Center" Style="{StaticResource YuukaTextStyle}" />
+                <Slider x:Name="SpacingSlider" Grid.Column="1" Minimum="0" Maximum="60" TickFrequency="5"
+                        ValueChanged="OnSpacingChanged" />
+                <TextBlock x:Name="SpacingValue" Grid.Column="2" TextAlignment="Right"
+                           VerticalAlignment="Center" Style="{StaticResource YuukaSubtleText}" />
+            </Grid>
+
+            <Grid Margin="0,0,0,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="170" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="46" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{ui:Tr layout.minWidth}" VerticalAlignment="Center" Style="{StaticResource YuukaTextStyle}" />
+                <Slider x:Name="MinWidthSlider" Grid.Column="1" Minimum="120" Maximum="600" TickFrequency="20"
+                        ValueChanged="OnMinWidthChanged" />
+                <TextBlock x:Name="MinWidthValue" Grid.Column="2" TextAlignment="Right"
+                           VerticalAlignment="Center" Style="{StaticResource YuukaSubtleText}" />
+            </Grid>
+
+            <Separator />
+
+            <TextBlock Text="{ui:Tr layout.barPosition}" Style="{StaticResource YuukaHeaderText}" />
+            <TextBlock Style="{StaticResource YuukaSubtleText}" TextWrapping="Wrap"
+                       Text="{ui:Tr layout.barPosition.hint}" />
+            <Button Content="{ui:Tr layout.clearPositions}" Margin="0,10,0,0" HorizontalAlignment="Left"
+                    Click="OnResetPositions" Style="{StaticResource YuukaButton}" />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

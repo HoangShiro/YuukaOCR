@@ -1,0 +1,48 @@
+<UserControl x:Class="YuukaOCR.App.Ui.Controls.ModelPicker"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid>
+        <!--
+            A TextBox, not an editable ComboBox. Opening a ComboBox dropdown re-syncs its text from
+            SelectedItem (null here), which wipes whatever was typed; keeping the field and the list
+            apart is what makes "focus shows everything, typing filters" behave.
+        -->
+        <TextBox x:Name="Editor" Style="{StaticResource YuukaTextBox}"
+                 TextChanged="OnEditorTextChanged"
+                 GotKeyboardFocus="OnEditorGotFocus"
+                 LostKeyboardFocus="OnEditorLostKeyboardFocus"
+                 PreviewKeyDown="OnEditorPreviewKeyDown"
+                 PreviewMouseLeftButtonDown="OnEditorMouseDown" />
+
+        <!-- StaysOpen + a non-focusable list: focus stays in the field while the list is open, so
+             typing keeps filtering and a click cannot close the popup before the row is taken. -->
+        <Popup x:Name="SuggestionPopup" PlacementTarget="{Binding ElementName=Editor}" Placement="Bottom"
+               StaysOpen="True" AllowsTransparency="True" Focusable="False" PopupAnimation="Fade">
+            <Border x:Name="SuggestionBorder" Background="{DynamicResource YuukaBg}"
+                    BorderBrush="{DynamicResource YuukaBorder}" BorderThickness="1"
+                    CornerRadius="7" Margin="0,4,0,0" MaxHeight="322">
+                <ListBox x:Name="SuggestionList" Style="{StaticResource YuukaListBox}" Focusable="False"
+                         MaxHeight="320" ScrollViewer.VerticalScrollBarVisibility="Auto"
+                         PreviewMouseLeftButtonDown="OnListMouseDown">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding Id}" TextTrimming="CharacterEllipsis">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource YuukaTextStyle}">
+                                        <Style.Triggers>
+                                            <!-- OpenRouter presets are pinned to the top and marked. -->
+                                            <DataTrigger Binding="{Binding IsPreset}" Value="True">
+                                                <Setter Property="FontWeight" Value="SemiBold" />
+                                                <Setter Property="Foreground" Value="{DynamicResource YuukaAccent}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Border>
+        </Popup>
+    </Grid>
+</UserControl>

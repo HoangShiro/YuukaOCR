@@ -1,0 +1,20 @@
+<Window x:Class="YuukaOCR.App.Ui.SnipOverlay"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="clr-namespace:YuukaOCR.App.Ui.Localization"
+        Title="{ui:Tr snip.title}" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        ShowInTaskbar="False" Topmost="True" ResizeMode="NoResize" Cursor="Cross"
+        SnapsToDevicePixels="True" UseLayoutRounding="True">
+
+    <Canvas x:Name="Surface" Background="#01000000">
+        <Rectangle x:Name="Shade" Fill="#66000000" />
+        <Rectangle x:Name="Selection" Stroke="#FFE98973" StrokeThickness="1.5" Fill="#22000000"
+                   Visibility="Collapsed" />
+        <Border x:Name="SizeBadge" Background="#CC1A1A1A" CornerRadius="6" Padding="7,3"
+                Visibility="Collapsed">
+            <TextBlock x:Name="SizeText" Foreground="White" FontSize="11" FontFamily="Segoe UI" />
+        </Border>
+        <TextBlock x:Name="HintLabel" Text="{ui:Tr snip.hint}"
+                   Foreground="#CCFFFFFF" FontSize="14" FontFamily="Segoe UI" />
+    </Canvas>
+</Window>

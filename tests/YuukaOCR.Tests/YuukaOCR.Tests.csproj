@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RootNamespace>YuukaOCR.Tests</RootNamespace>
+    <AssemblyName>YuukaOCR.Tests</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\YuukaOCR.Core\YuukaOCR.Core.csproj" />
+  </ItemGroup>
+</Project>

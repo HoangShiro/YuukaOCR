@@ -1,0 +1,16 @@
+﻿{
+  "UiImage": "ui.png",
+  "AcceptedFileExtensions": [".pdf", ".mp3", ".wav", ".m4a", ".flac", ".ogg", ".jpeg", ".jpg", ".png", ".gif", ".bmp", ".tiff", ".ico", ".webp", ".txt", ".md", ".json", ".csv"],
+  "MaxFileSizeMb": 100,
+  "HookProximityTop": 100,
+  "HookProximityBottom": 100,
+  "HookOffsetTop": 0,
+  "HookOffsetBottom": 0,
+  "UnhookDistance": 100,
+  "SpringConstant": 0.1,
+  "DampingFactor": 0.45,
+  "BounceDampingFactor": 0.3,
+  "HookOcrHotkey": "middle",
+  "DefaultProvider": "gemini",
+  "DefaultPrompt": "LUÔN LUÔN dịch text sang tiếng việt với tone phù hợp với ngữ cảnh/giọng điệu/ngôn ngữ trẻ trung/anime. Chỉ trả về duy nhất text được dịch."
+}

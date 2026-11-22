@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/YuukaOCR.App/YuukaOCR.App.csproj" />
+    <Project Path="src/YuukaOCR.Core/YuukaOCR.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/YuukaOCR.Tests/YuukaOCR.Tests.csproj" />
+  </Folder>
+</Solution>

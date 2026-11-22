@@ -1,0 +1,128 @@
+﻿<UserControl x:Class="YuukaOCR.App.Ui.Tabs.HookingTab"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="clr-namespace:YuukaOCR.App.Ui.Localization"
+             xmlns:controls="clr-namespace:YuukaOCR.App.Ui.Controls">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,8,0">
+        <StackPanel>
+            <TextBlock Text="{ui:Tr hook.mode}" Style="{StaticResource YuukaHeaderText}" />
+            <TextBlock Style="{StaticResource YuukaSubtleText}" TextWrapping="Wrap"
+                       Text="{ui:Tr hook.mode.hint}" />
+
+            <ComboBox x:Name="ModeBox" Width="180" HorizontalAlignment="Left" Margin="0,8,0,0"
+                      SelectionChanged="OnModeChanged" />
+
+            <Separator Margin="0,14,0,10" />
+
+            <TextBlock Text="{ui:Tr hook.edges}" Style="{StaticResource YuukaHeaderText}" />
+            <TextBlock Style="{StaticResource YuukaSubtleText}" TextWrapping="Wrap"
+                       Text="{ui:Tr hook.edges.hint}" />
+
+            <Grid Margin="0,12,0,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="190" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="52" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{ui:Tr hook.proximityTop}" VerticalAlignment="Center" Style="{StaticResource YuukaTextStyle}" />
+                <!-- Window edge snapping: the marks are doubled (6 DIP) so the discrete steps read as steps. -->
+                <Slider x:Name="ProximityTopSlider" Grid.Column="1" Minimum="0" Maximum="400" TickFrequency="100" controls:SliderTicks.Thickness="6" />
+                <TextBlock x:Name="ProximityTopValue" Grid.Column="2" TextAlignment="Right"
+                           VerticalAlignment="Center" Style="{StaticResource YuukaSubtleText}" />
+            </Grid>
+
+            <Grid Margin="0,0,0,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="190" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="52" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{ui:Tr hook.proximityBottom}" VerticalAlignment="Center" Style="{StaticResource YuukaTextStyle}" />
+                <Slider x:Name="ProximityBottomSlider" Grid.Column="1" Minimum="0" Maximum="400" TickFrequency="100" controls:SliderTicks.Thickness="6" />
+                <TextBlock x:Name="ProximityBottomValue" Grid.Column="2" TextAlignment="Right"
+                           VerticalAlignment="Center" Style="{StaticResource YuukaSubtleText}" />
+            </Grid>
+
+            <Grid Margin="0,0,0,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="190" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="52" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{ui:Tr hook.offsetTop}" VerticalAlignment="Center" Style="{StaticResource YuukaTextStyle}" />
+                <Slider x:Name="OffsetTopSlider" Grid.Column="1" Minimum="-100" Maximum="100" TickFrequency="50" controls:SliderTicks.Thickness="6" />
+                <TextBlock x:Name="OffsetTopValue" Grid.Column="2" TextAlignment="Right"
+                           VerticalAlignment="Center" Style="{StaticResource YuukaSubtleText}" />
+            </Grid>
+
+            <Grid Margin="0,0,0,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="190" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="52" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{ui:Tr hook.offsetBottom}" VerticalAlignment="Center" Style="{StaticResource YuukaTextStyle}" />
+                <Slider x:Name="OffsetBottomSlider" Grid.Column="1" Minimum="-100" Maximum="100" TickFrequency="50" controls:SliderTicks.Thickness="6" />
+                <TextBlock x:Name="OffsetBottomValue" Grid.Column="2" TextAlignment="Right"
+                           VerticalAlignment="Center" Style="{StaticResource YuukaSubtleText}" />
+            </Grid>
+
+            <Grid Margin="0,0,0,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="190" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="52" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{ui:Tr hook.unhookDistance}" VerticalAlignment="Center" Style="{StaticResource YuukaTextStyle}" />
+                <Slider x:Name="UnhookSlider" Grid.Column="1" Minimum="0" Maximum="600" TickFrequency="100" controls:SliderTicks.Thickness="6" />
+                <TextBlock x:Name="UnhookValue" Grid.Column="2" TextAlignment="Right"
+                           VerticalAlignment="Center" Style="{StaticResource YuukaSubtleText}" />
+            </Grid>
+
+            <Separator />
+
+            <TextBlock Text="{ui:Tr hook.physics}" Style="{StaticResource YuukaHeaderText}" />
+            <TextBlock Style="{StaticResource YuukaSubtleText}" TextWrapping="Wrap"
+                       Text="{ui:Tr hook.physics.hint}" />
+
+            <Grid Margin="0,12,0,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="190" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="52" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{ui:Tr hook.spring}" VerticalAlignment="Center" Style="{StaticResource YuukaTextStyle}" />
+                <Slider x:Name="SpringSlider" Grid.Column="1" Minimum="0" Maximum="50" TickFrequency="10" />
+                <TextBlock x:Name="SpringValue" Grid.Column="2" TextAlignment="Right"
+                           VerticalAlignment="Center" Style="{StaticResource YuukaSubtleText}" />
+            </Grid>
+
+            <Grid Margin="0,0,0,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="190" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="52" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{ui:Tr hook.damping}" VerticalAlignment="Center" Style="{StaticResource YuukaTextStyle}" />
+                <Slider x:Name="DampingSlider" Grid.Column="1" Minimum="0" Maximum="100" TickFrequency="10" />
+                <TextBlock x:Name="DampingValue" Grid.Column="2" TextAlignment="Right"
+                           VerticalAlignment="Center" Style="{StaticResource YuukaSubtleText}" />
+            </Grid>
+
+            <Grid Margin="0,0,0,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="190" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="52" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{ui:Tr hook.bounce}" VerticalAlignment="Center" Style="{StaticResource YuukaTextStyle}" />
+                <Slider x:Name="BounceSlider" Grid.Column="1" Minimum="0" Maximum="100" TickFrequency="10" />
+                <TextBlock x:Name="BounceValue" Grid.Column="2" TextAlignment="Right"
+                           VerticalAlignment="Center" Style="{StaticResource YuukaSubtleText}" />
+            </Grid>
+
+            <Button Content="{ui:Tr hook.reset}" Margin="0,16,0,0" HorizontalAlignment="Left"
+                    Click="OnResetDefaults" Style="{StaticResource YuukaButton}" />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

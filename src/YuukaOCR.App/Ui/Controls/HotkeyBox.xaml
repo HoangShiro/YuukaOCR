@@ -1,0 +1,22 @@
+<UserControl x:Class="YuukaOCR.App.Ui.Controls.HotkeyBox"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="clr-namespace:YuukaOCR.App.Ui.Localization"
+             Focusable="True" Cursor="Hand" MinWidth="180">
+    <Border x:Name="Root" CornerRadius="7" Background="{DynamicResource YuukaPanel}"
+            BorderBrush="{DynamicResource YuukaBorder}" BorderThickness="1" Padding="10,6">
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="ValueText" Text="{ui:Tr hotkey.none}" VerticalAlignment="Center"
+                       Foreground="{DynamicResource YuukaText}"
+                       FontFamily="{DynamicResource YuukaFontFamily}"
+                       FontSize="{DynamicResource YuukaFontSize}" />
+            <TextBlock x:Name="HintText" Grid.Column="1" Text="{ui:Tr hotkey.hint}" VerticalAlignment="Center"
+                       Foreground="{DynamicResource YuukaSubtle}"
+                       FontFamily="{DynamicResource YuukaFontFamily}" FontSize="10" />
+        </Grid>
+    </Border>
+</UserControl>

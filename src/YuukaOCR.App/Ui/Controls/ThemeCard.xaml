@@ -1,0 +1,68 @@
+﻿<UserControl x:Class="YuukaOCR.App.Ui.Controls.ThemeCard"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Width="128" Margin="0,0,10,10">
+    <!--
+        A radio button rather than a button: the group makes the selection exclusive for free and the
+        template's IsChecked trigger draws the selected ring, so nothing has to be tracked in code.
+    -->
+    <RadioButton x:Name="Root" GroupName="YuukaThemePreset" Cursor="Hand" Checked="OnChecked"
+                 IsChecked="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=UserControl}, Mode=TwoWay}">
+        <RadioButton.Template>
+            <ControlTemplate TargetType="RadioButton">
+                <Border x:Name="Card" CornerRadius="10" Padding="7" BorderThickness="2"
+                        Background="{DynamicResource YuukaPanel}" BorderBrush="{DynamicResource YuukaBorder}">
+                    <StackPanel>
+                        <!-- Miniature of the app: bar pill on the preset background, a panel with two text lines. -->
+                        <Border CornerRadius="6" Height="48" BorderThickness="1"
+                                Background="{Binding PreviewBackground, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                BorderBrush="{Binding PreviewBorder, RelativeSource={RelativeSource AncestorType=UserControl}}">
+                            <Grid Margin="7,6">
+                                <Border Height="10" Width="54" CornerRadius="5" VerticalAlignment="Top"
+                                        HorizontalAlignment="Left"
+                                        Background="{Binding BarBrush, RelativeSource={RelativeSource AncestorType=UserControl}}" />
+                                <Ellipse Width="9" Height="9" VerticalAlignment="Top" HorizontalAlignment="Right"
+                                         Fill="{Binding AccentBrush, RelativeSource={RelativeSource AncestorType=UserControl}}" />
+                                <Border CornerRadius="5" Margin="0,15,0,0" Padding="6,5"
+                                        Background="{Binding PreviewPanel, RelativeSource={RelativeSource AncestorType=UserControl}}">
+                                    <StackPanel>
+                                        <Border Height="3" Width="42" CornerRadius="1.5" HorizontalAlignment="Left"
+                                                Background="{Binding PreviewText, RelativeSource={RelativeSource AncestorType=UserControl}}" />
+                                        <Border Height="3" Width="26" CornerRadius="1.5" HorizontalAlignment="Left"
+                                                Margin="0,3,0,0"
+                                                Background="{Binding PreviewSubtle, RelativeSource={RelativeSource AncestorType=UserControl}}" />
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <Grid Margin="2,7,2,0">
+                            <TextBlock Text="{Binding PresetName, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                       Margin="0,0,14,0" FontSize="11" TextTrimming="CharacterEllipsis"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource YuukaText}"
+                                       FontFamily="{DynamicResource YuukaFontFamily}" />
+                            <Path x:Name="Check" Data="M 0,4 L 3.4,7.4 L 9,0" Visibility="Collapsed"
+                                  Stroke="{DynamicResource YuukaAccent}" StrokeThickness="1.8"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                  HorizontalAlignment="Right" VerticalAlignment="Center" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsChecked" Value="True">
+                        <Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource YuukaAccent}" />
+                        <Setter TargetName="Check" Property="Visibility" Value="Visible" />
+                    </Trigger>
+                    <MultiTrigger>
+                        <MultiTrigger.Conditions>
+                            <Condition Property="IsChecked" Value="False" />
+                            <Condition Property="IsMouseOver" Value="True" />
+                        </MultiTrigger.Conditions>
+                        <Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource YuukaAccent}" />
+                    </MultiTrigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate>
+        </RadioButton.Template>
+    </RadioButton>
+</UserControl>
