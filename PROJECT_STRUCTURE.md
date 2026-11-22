@@ -280,6 +280,7 @@ sequenceDiagram
 | 47 | Hooked bar travels with the target window, horizontally too | `Interop/WindowTracker.cs` (`AnchorFor`, `Follow`, `HookCandidate.AnchorX`), `Ui/MainWindow.cs` (`HookTick`, `EndDrag` re-anchor, 50 ms poll) |
 | 48 | Conversation messages are selectable and copyable | `Ui/ResultWindow.cs` (`CreateMessageBox`, `RenderConversation`, `_messageTrackers`), `Ui/SelectionCopy.cs` |
 | 49 | Action icons follow the active theme immediately | `Ui/Controls/ActionIcons.cs` (`Glyph(..., string resourceKey)`), Prompt/Agent tab, `Ui/ResultWindow.cs` (`BuildActionBar`), `Ui/Styles.xaml` (`YuukaChipButton`) |
+| 50 | What the chat sends is never a silent no-op, and every request is logged by size | `Ui/ResultWindow.cs` (`SendChatAsync`: empty press → `agent.chat.empty` hint, failed send restores the question), `Core/Agent/AgentService.cs` (`agent.request` console line: scope, context chars, turns) |
 
 ---
 
@@ -404,6 +405,15 @@ sequenceDiagram
     scrollers switched off. It looks like the `TextBlock` it replaced (same font, size, alignment,
     margin), and `SelectionCopy.Attach` gives it the floating copy button; the trackers are disposed
     when the list is rebuilt.
+
+36. **A press that does nothing is a bug** — the bubble's controls must never return early and leave
+    the user with no reaction. `SendChatAsync` used to `return` on an empty box, which produced no
+    request, no error and no turn in `user/log.json`: from outside it is indistinguishable from "the
+    OCR context was never sent". It now hands the empty message to `AgentService`, which owns the
+    text (`agent.chat.empty`, "Type a message first.") and the bubble shows it as a hint, and a failed
+    send puts the question back in the box. `AgentService` logs one `agent.request` line per request
+    with the scope, the context length and the history size — never the text, never a key — because
+    that is what separates "the model ignored the context" from "no context was sent".
 
 ---
 

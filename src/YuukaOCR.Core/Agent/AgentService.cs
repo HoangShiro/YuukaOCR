@@ -120,6 +120,14 @@ public sealed class AgentService : IDisposable
                 agent.Instruction, contextInSystem ? context : null, contextLabel);
             var turns = AgentPrompts.TrimHistory(History, agent.ContextTokens);
 
+            // One line per request, sizes only. This is what tells "the model ignored the context" apart
+            // from "no context was ever sent" without putting any of the text — or a key — in a log.
+            _log.ConsoleLog(L.F(
+                "agent.request",
+                string.IsNullOrWhiteSpace(contextLabel) ? L.T("agent.context") : contextLabel!,
+                (context ?? "").Trim().Length,
+                turns.Count));
+
             var request = new LlmRequest(
                 model,
                 message,

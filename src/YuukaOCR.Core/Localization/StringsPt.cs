@@ -351,6 +351,7 @@ internal static class StringsPt
         ["agent.chat.cancelled"] = "Cancelado.",
         ["agent.chat.failed"] = "O chat falhou: {0}",
         ["agent.noKey"] = "Sem chave de API para {0}. Adicione em Configurações -> Sistema.",
+        ["agent.request"] = "pedido ao agente — {0}: {1} caracteres de contexto, {2} turnos de histórico",
         ["agent.context"] = "Contexto",
         ["agent.action.empty"] = "Descreva o que esta ação deve fazer.",
         ["logline.chatCleared"] = "Histórico de chat limpo.",

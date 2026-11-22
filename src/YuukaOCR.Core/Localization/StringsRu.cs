@@ -351,6 +351,7 @@ internal static class StringsRu
         ["agent.chat.cancelled"] = "Отменено.",
         ["agent.chat.failed"] = "Ошибка чата: {0}",
         ["agent.noKey"] = "Нет API-ключа для {0}. Добавьте его в Настройки -> Система.",
+        ["agent.request"] = "запрос к агенту — {0}: {1} символов контекста, {2} реплик истории",
         ["agent.context"] = "Контекст",
         ["agent.action.empty"] = "Опишите, что должно делать это действие.",
         ["logline.chatCleared"] = "История чата очищена.",

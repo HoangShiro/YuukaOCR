@@ -10,7 +10,9 @@ using YuukaOCR.App.Ui.Controls;
 using YuukaOCR.App.Ui.Tabs;
 using YuukaOCR.Core.Agent;
 using YuukaOCR.Core.Interop;
+using YuukaOCR.Core;
 using YuukaOCR.Core.Localization;
+using YuukaOCR.Core.Providers;
 using YuukaOCR.Core.Settings;
 
 namespace XamlCheck;
@@ -43,6 +45,7 @@ internal static class LayoutProbe
         ThemeContrast();
         ActionButtons(services);
         ActionBarSync(services);
+        ChatContextReachesTheModel(services);
 
         return _failures;
     }
@@ -651,6 +654,9 @@ internal static class LayoutProbe
 
     private static Color Colour(Brush? brush) => brush is SolidColorBrush solid ? solid.Color : Colors.Transparent;
 
+    private static string Describe(string? text) =>
+        text is null ? "<no request>" : $"\"{text.Replace("\r", "").Replace("\n", "⏎")}\"";
+
     private static string Describe(IEnumerable<Color> colours) =>
         string.Join(" ", colours.Select(c => c.ToString()).Distinct());
 
@@ -1165,6 +1171,290 @@ internal static class LayoutProbe
     }
 
     // -------------------------------------------------------------- helpers
+
+    /// <summary>
+    /// The OCR text must reach the model in both scopes. This presses the bubble's own send button and
+    /// reads the request that actually leaves the app (a loopback HTTP server stands in for the
+    /// provider), so it asserts the payload, not the intent: the whole result when the chip reads
+    /// "OCR result", only the selection when it reads "Selected text". A scope that quietly sends
+    /// nothing is indistinguishable, from the user's side, from a model that "cannot see the text".
+    /// </summary>
+    private static void ChatContextReachesTheModel(AppServices services)
+    {
+        const string firstLine = "First line of the OCR result.";
+        const string secondLine = "Second line, the one the user asks about.";
+        const string ocr = firstLine + "\n" + secondLine;
+
+        var settings = services.Settings.Settings;
+        var saved = (settings.ApiProvider, settings.CustomBaseUrl,
+                     settings.Agent.Provider, settings.Agent.Model, settings.Agent.Instruction);
+
+        // Provider "custom" is the only one that honours CustomBaseUrl, so it is the one that can
+        // be pointed at the loopback server.
+        var hadKey = ApiKeyPool.LoadFor(AppPaths.EnvFile, "custom").Count > 0;
+        using var server = new LoopbackServer();
+        var result = new ResultWindow(services);
+
+        try
+        {
+            ApiKeyPool.AddKey(AppPaths.EnvFile, "custom", "probe-key");
+            settings.ApiProvider = "custom";
+            settings.CustomBaseUrl = $"http://127.0.0.1:{server.Port}/v1";
+            settings.Agent.Provider = "custom";
+            settings.Agent.Model = "probe-model";
+            settings.Agent.Instruction = "You are a probe.";
+
+            result.ShowText(ocr, null, activate: false);
+
+            if (result.FindName("ResultBox") is not TextBox box ||
+                result.FindName("ChatBox") is not TextBox chat ||
+                result.FindName("SendButton") is not Button send ||
+                result.FindName("ScopeText") is not TextBlock scope)
+            {
+                Fail("chat context: ResultBox/ChatBox/SendButton/ScopeText not found");
+                return;
+            }
+
+            var checks = new List<string>();
+
+            // ---- scope 1: the whole OCR result (the default, and what "OCR result" advertises)
+            Focus(chat);
+            chat.Text = "What does it say?";
+            send.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+
+            var whole = SystemOf(server.Wait(0));
+            checks.Add($"whole-request-sent:{whole is not null}");
+            checks.Add($"whole-has-system:{whole is not null}");
+            checks.Add($"whole-has-first-line:{whole?.Contains(firstLine, StringComparison.Ordinal) == true}");
+            checks.Add($"whole-has-second-line:{whole?.Contains(secondLine, StringComparison.Ordinal) == true}");
+            checks.Add($"whole-named:{whole?.Contains(L.T("result.context.all"), StringComparison.Ordinal) == true}");
+
+            // ---- scope 2: a selection, which must not drag the rest of the result along
+            var start = ocr.IndexOf(secondLine, StringComparison.Ordinal);
+            box.Select(start, secondLine.Length);
+            Pump();
+            checks.Add($"chip-switched:{scope.Text == L.T("result.context.selection")}");
+
+            Focus(chat);
+            chat.Text = "And this part?";
+            send.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+
+            var picked = SystemOf(server.Wait(1));
+            checks.Add($"selection-request-sent:{picked is not null}");
+            checks.Add($"selection-has-picked-line:{picked?.Contains(secondLine, StringComparison.Ordinal) == true}");
+            checks.Add($"selection-drops-rest:{picked?.Contains(firstLine, StringComparison.Ordinal) == false}");
+            checks.Add($"selection-named:{picked?.Contains(L.T("result.context.selection"), StringComparison.Ordinal) == true}");
+
+            // ---- scope 3: the chip clicked back to the whole result, which must send the full text again
+            // (a stale pin here would keep answering about the fragment while the chip advertises "OCR result")
+            if (result.FindName("ScopeButton") is Button chip) chip.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            Pump();
+            checks.Add($"chip-back:{scope.Text == L.T("result.context.all")}");
+
+            Focus(chat);
+            chat.Text = "And the whole thing?";
+            send.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+
+            var again = SystemOf(server.Wait(2));
+            checks.Add($"back-request-sent:{again is not null}");
+            checks.Add($"back-has-first-line:{again?.Contains(firstLine, StringComparison.Ordinal) == true}");
+            checks.Add($"back-has-second-line:{again?.Contains(secondLine, StringComparison.Ordinal) == true}");
+
+            // ---- an empty box must not be a silent no-op: it has to say so, and send nothing
+            var requests = server.Count;
+            if (result.FindName("HintText") is TextBlock hint) hint.Text = "";
+            Focus(chat);
+            chat.Text = "";
+            send.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            Pump();
+
+            checks.Add($"empty-says-something:{(result.FindName("HintText") as TextBlock)?.Text == L.T("agent.chat.empty")}");
+            checks.Add($"empty-sends-nothing:{server.Count == requests}");
+
+            var failures = checks.Where(c => c.EndsWith(":False", StringComparison.Ordinal)).ToList();
+            if (failures.Count > 0)
+                Fail($"chat context: {string.Join(", ", failures)} " +
+                     $"(requests={server.Count}, whole={Describe(whole)}, selection={Describe(picked)})");
+            else
+                Pass($"the OCR text reaches the model in both scopes ({checks.Count} checks, {server.Count} requests)");
+        }
+        catch (Exception ex)
+        {
+            Fail($"chat context: {ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            settings.ApiProvider = saved.ApiProvider;
+            settings.CustomBaseUrl = saved.CustomBaseUrl;
+            settings.Agent.Provider = saved.Provider;
+            settings.Agent.Model = saved.Model;
+            settings.Agent.Instruction = saved.Instruction;
+
+            if (!hadKey) ApiKeyPool.RemoveProvider(AppPaths.EnvFile, "custom");
+            services.Agent.ClearHistory();
+            result.Close();
+        }
+    }
+
+    /// <summary>The decoded system message of a captured request, or null when there is no request.</summary>
+    private static string? SystemOf(string? body)
+    {
+        if (body is null) return null;
+
+        using var doc = System.Text.Json.JsonDocument.Parse(body);
+        if (!doc.RootElement.TryGetProperty("messages", out var messages) ||
+            messages.ValueKind != System.Text.Json.JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        foreach (var message in messages.EnumerateArray())
+        {
+            if (message.TryGetProperty("role", out var role) && role.GetString() == "system" &&
+                message.TryGetProperty("content", out var content))
+            {
+                return content.GetString();
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Makes the chat box believe it was clicked, so the placeholder stops being a message.</summary>
+    private static void Focus(TextBox box)
+    {
+        box.RaiseEvent(new KeyboardFocusChangedEventArgs(Keyboard.PrimaryDevice, Environment.TickCount, null, box)
+        {
+            RoutedEvent = Keyboard.GotKeyboardFocusEvent
+        });
+        Pump();
+    }
+
+    /// <summary>
+    /// A loopback HTTP server that answers every request with one canned chat completion and keeps the
+    /// request bodies. Raw sockets, not `HttpListener`: a listener prefix needs a URL ACL, a
+    /// `TcpListener` on port 0 does not, and the probe has to run unattended.
+    /// </summary>
+    private sealed class LoopbackServer : IDisposable
+    {
+        private readonly System.Net.Sockets.TcpListener _listener;
+        private readonly List<string> _bodies = new();
+        private readonly System.Threading.CancellationTokenSource _stop = new();
+
+        public LoopbackServer()
+        {
+            _listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+            _listener.Start();
+            Port = ((System.Net.IPEndPoint)_listener.LocalEndpoint).Port;
+            _ = Task.Run(AcceptAsync);
+        }
+
+        public int Port { get; }
+
+        public int Count
+        {
+            get { lock (_bodies) return _bodies.Count; }
+        }
+
+        /// <summary>Waits for request <paramref name="index"/> while pumping the dispatcher.</summary>
+        public string? Wait(int index)
+        {
+            var deadline = Environment.TickCount64 + 15000;
+            while (Environment.TickCount64 < deadline)
+            {
+                Pump();
+                lock (_bodies)
+                {
+                    if (_bodies.Count > index) return _bodies[index];
+                }
+                Thread.Sleep(10);
+            }
+
+            return null;
+        }
+
+        private async Task AcceptAsync()
+        {
+            while (!_stop.IsCancellationRequested)
+            {
+                System.Net.Sockets.TcpClient client;
+                try
+                {
+                    client = await _listener.AcceptTcpClientAsync(_stop.Token).ConfigureAwait(false);
+                }
+                catch
+                {
+                    return;
+                }
+
+                _ = Task.Run(() => ServeAsync(client));
+            }
+        }
+
+        private async Task ServeAsync(System.Net.Sockets.TcpClient client)
+        {
+            using (client)
+            {
+                try
+                {
+                    var stream = client.GetStream();
+                    var buffer = new List<byte>(8192);
+                    var chunk = new byte[4096];
+                    var headerEnd = -1;
+                    var length = 0;
+
+                    while (true)
+                    {
+                        var read = await stream.ReadAsync(chunk, 0, chunk.Length).ConfigureAwait(false);
+                        if (read <= 0) return;
+                        buffer.AddRange(chunk.Take(read));
+
+                        if (headerEnd < 0)
+                        {
+                            var head = System.Text.Encoding.ASCII.GetString(buffer.ToArray());
+                            var index = head.IndexOf("\r\n\r\n", StringComparison.Ordinal);
+                            if (index >= 0)
+                            {
+                                headerEnd = index + 4;
+                                foreach (var line in head[..index].Split("\r\n"))
+                                {
+                                    if (line.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase))
+                                        int.TryParse(line["Content-Length:".Length..].Trim(), out length);
+                                }
+                            }
+                        }
+
+                        if (headerEnd >= 0 && buffer.Count >= headerEnd + length) break;
+                    }
+
+                    lock (_bodies)
+                    {
+                        _bodies.Add(System.Text.Encoding.UTF8.GetString(buffer.ToArray(), headerEnd, length));
+                    }
+
+                    const string json = "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"Probe answer.\"}}]}";
+                    var payload = System.Text.Encoding.UTF8.GetBytes(json);
+                    var reply = System.Text.Encoding.ASCII.GetBytes(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " + payload.Length +
+                        "\r\nConnection: close\r\n\r\n");
+
+                    await stream.WriteAsync(reply, 0, reply.Length).ConfigureAwait(false);
+                    await stream.WriteAsync(payload, 0, payload.Length).ConfigureAwait(false);
+                    await stream.FlushAsync().ConfigureAwait(false);
+                }
+                catch
+                {
+                    // A probe request that dies is reported as a missing body by the caller.
+                }
+            }
+        }
+
+        public void Dispose()
+        {
+            _stop.Cancel();
+            try { _listener.Stop(); } catch { /* already stopped */ }
+        }
+    }
 
     private static Window Host(FrameworkElement content, double width = 460, double height = 760)
     {

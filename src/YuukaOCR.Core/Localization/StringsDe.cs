@@ -339,6 +339,7 @@ internal static class StringsDe
         ["agent.chat.cancelled"] = "Abgebrochen.",
         ["agent.chat.failed"] = "Chat fehlgeschlagen: {0}",
         ["agent.noKey"] = "Kein API-Schlüssel für {0}. Füge ihn unter Einstellungen -> System hinzu.",
+        ["agent.request"] = "Agent-Anfrage — {0}: {1} Zeichen Kontext, {2} Verlaufseinträge",
         ["agent.context"] = "Kontext",
         ["agent.action.empty"] = "Beschreibe, was diese Aktion tun soll.",
         ["logline.chatCleared"] = "Chatverlauf gelöscht.",

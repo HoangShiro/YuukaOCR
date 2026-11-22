@@ -351,6 +351,7 @@ internal static class StringsVi
         ["agent.chat.cancelled"] = "Đã huỷ.",
         ["agent.chat.failed"] = "Chat lỗi: {0}",
         ["agent.noKey"] = "Chưa có API key cho {0}. Thêm trong Cài đặt -> Hệ thống.",
+        ["agent.request"] = "yêu cầu agent — {0}: {1} ký tự ngữ cảnh, {2} lượt hội thoại",
         ["agent.context"] = "Ngữ cảnh",
         ["agent.action.empty"] = "Mô tả hành động này nên làm gì.",
         ["logline.chatCleared"] = "Đã xoá lịch sử chat.",

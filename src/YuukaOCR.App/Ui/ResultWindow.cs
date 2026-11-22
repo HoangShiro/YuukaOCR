@@ -488,14 +488,28 @@ public partial class ResultWindow : Window, IThemedWindow
     private async Task SendChatAsync()
     {
         var message = _placeholderShown ? "" : ChatBox.Text.Trim();
-        if (message.Length == 0) return;
-
         var context = CurrentContext();
-        ChatBox.Text = "";
-        _placeholderShown = false;
+
+        // An empty box is not a silent no-op: the service answers with `agent.chat.empty` and the bubble
+        // shows that as a hint. Returning early here made the press invisible — no request, no error and
+        // no turn in the log — which reads exactly like "the OCR context was never sent".
+        if (message.Length > 0)
+        {
+            ChatBox.Text = "";
+            _placeholderShown = false;
+        }
 
         var reply = await _services.Agent.AskAsync(message, context.Text, context.Label);
-        if (!reply.Ok) ShowHint(reply.Error);
+        if (reply.Ok) return;
+
+        // The request did not leave: put the question back so the user can retry instead of retyping it.
+        if (message.Length > 0 && ChatBox.Text.Length == 0)
+        {
+            ChatBox.Text = message;
+            _placeholderShown = false;
+        }
+
+        ShowHint(reply.Error);
     }
 
     /// <summary>

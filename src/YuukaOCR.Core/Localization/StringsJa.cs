@@ -350,6 +350,7 @@ internal static class StringsJa
         ["agent.chat.cancelled"] = "キャンセルしました。",
         ["agent.chat.failed"] = "チャット失敗: {0}",
         ["agent.noKey"] = "{0} の API キーがありません。設定 -> システムで追加してください。",
+        ["agent.request"] = "agent リクエスト — {0}: コンテキスト {1} 文字、履歴 {2} ターン",
         ["agent.context"] = "文脈",
         ["agent.action.empty"] = "このアクションが何をするか書いてください。",
         ["logline.chatCleared"] = "チャット履歴を消去しました。",

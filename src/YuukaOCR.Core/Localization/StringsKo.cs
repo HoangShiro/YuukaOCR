@@ -335,6 +335,7 @@ internal static class StringsKo
         ["agent.chat.cancelled"] = "취소했습니다.",
         ["agent.chat.failed"] = "대화 실패: {0}",
         ["agent.noKey"] = "{0} API 키가 없습니다. 설정 -> 시스템에서 추가하세요.",
+        ["agent.request"] = "agent 요청 — {0}: 컨텍스트 {1}자, 기록 {2}턴",
         ["agent.context"] = "문맥",
         ["agent.action.empty"] = "이 동작이 무엇을 해야 하는지 적어 주세요.",
         ["logline.chatCleared"] = "대화 기록을 지웠습니다.",

@@ -351,6 +351,7 @@ internal static class StringsZh
         ["agent.chat.cancelled"] = "已取消。",
         ["agent.chat.failed"] = "聊天失败: {0}",
         ["agent.noKey"] = "{0} 没有 API 密钥。请在 设置 -> 系统 中添加。",
+        ["agent.request"] = "agent 请求 — {0}：上下文 {1} 个字符，历史 {2} 轮",
         ["agent.context"] = "上下文",
         ["agent.action.empty"] = "描述这个动作应该做什么。",
         ["logline.chatCleared"] = "已清空聊天记录。",

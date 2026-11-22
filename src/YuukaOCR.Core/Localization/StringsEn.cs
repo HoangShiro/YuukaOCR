@@ -351,6 +351,7 @@ internal static class StringsEn
         ["agent.chat.cancelled"] = "Cancelled.",
         ["agent.chat.failed"] = "Chat failed: {0}",
         ["agent.noKey"] = "No API key for {0}. Add one in Settings -> System.",
+        ["agent.request"] = "agent request — {0}: {1} chars of context, {2} turns of history",
         ["agent.context"] = "Context",
         ["agent.action.empty"] = "Describe what this action should do.",
         ["logline.chatCleared"] = "Chat history cleared.",

@@ -376,6 +376,7 @@ ran (CLI, logs — no GUI interaction, as required).
 | 16 | Fixed: the hooked bar did not move when the target window was moved sideways | `HookCandidate.AnchorX` (bar left − window left) + `WindowTracker.Follow`; `MainWindow.HookTick` recomputes from it every tick, `EndDrag` re-anchors after the user drags the bar, poll 140 → 50 ms | test `WindowTracker: a hooked bar travels with its window` (offset identical at every step of a 0..120 px move, clamping at the work-area edge); `xamlcheck` probe `a hooked bar follows a real window across the screen` (13 checks against live DWM bounds, including a `old-formula-stays-put` contrast check) |
 | 17 | Chat messages were plain labels: no selection, no copy | `ResultWindow.CreateMessageBox` (read-only TextBox styled as a label) + `SelectionCopy.Attach` per message, trackers disposed on rebuild | `xamlcheck` probe `conversation messages are selectable and copyable` (23 checks: both sides selectable, `ApplicationCommands.Copy` enabled, highlight still painted after focus moves to the chat box, label/body order and alignment unchanged) |
 | 18 | Action icon colours ignored the theme | `ActionIcons.Glyph(key, size, resourceKey)` → `SetResourceReference(Shape.Stroke)`; same for the icon picker, the action chips and the bubble's action bar; `YuukaChipButton` paints `{TemplateBinding Background}` | `xamlcheck` probe `action icons follow a live theme switch` (6 checks: dark palette ink, then Daylight after a preset change with no rebuild; 1368/1612 px of the selected chip painted in the new accent) |
+| 19 | Reported: "Full OCR results" sent no OCR context to the agent | `ResultWindow.SendChatAsync` no longer returns early on an empty box — the press reaches `AgentService`, which answers with `agent.chat.empty` and the bubble shows the hint; a failed send puts the question back. `AgentService` logs one `agent.request` line per request (scope, context chars, history turns — no text, no key) | `xamlcheck` probe `the OCR text reaches the model in both scopes` (16 checks, 3 requests: whole result, selection only, chip clicked back to the whole result, plus an empty press that sends nothing and says why). Both halves proven to bite: restoring the early `return` gives `empty-says-something:False`, letting a stale pin win gives `back-has-first-line:False`. Also checked live against the user's own provider and model (`@preset/code`): all three scopes answered from the OCR text |
 
 ### Verification (CLI only)
 
@@ -383,7 +384,7 @@ ran (CLI, logs — no GUI interaction, as required).
 dotnet build YuukaOCR.slnx -c Release                     Build succeeded, 0 warnings, 0 errors
 dotnet run --project tests/YuukaOCR.Tests -c Release       53/53 passed
 dotnet run --project tools/xamlcheck -c Release            12 windows/tabs + 29 probes, all passed
-dotnet publish ... -r win-x64 -o publish                   YuukaOCR.exe 341,504 B, version 2.1.0.0
+dotnet publish ... -r win-x64 -o publish                   YuukaOCR.exe 349,696 B (apphost) + YuukaOCR.dll 669,696 B, version 2.1.0.0
 ```
 
 Probes worth naming:
@@ -395,6 +396,7 @@ OK  ChatBox at 100/125/150 %: 30.4 / 34.4 / 37.6 DIP for a 23.6 / 27.5 / 31.4 DI
 OK  a hooked bar follows a real window across the screen (13 checks)
 OK  conversation messages are selectable and copyable (23 checks, highlight ink 1428/1428/893/893 px)
 OK  action icons follow a live theme switch (6 checks, 1368/1612 accent px on the selected tab)
+OK  the OCR text reaches the model in both scopes (16 checks, 3 requests)
 ```
 
 The mark count is rendered through a `VisualBrush`: `RenderTargetBitmap.Render(element)` includes the
