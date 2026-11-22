@@ -4,10 +4,12 @@ using YuukaOCR.Core.Agent;
 using YuukaOCR.Core.Input;
 using YuukaOCR.Core.Interop;
 using YuukaOCR.Core.Localization;
+using YuukaOCR.Core.Logging;
 using YuukaOCR.Core.Ocr;
 using YuukaOCR.Core.Physics;
 using YuukaOCR.Core.Providers;
 using YuukaOCR.Core.Settings;
+using YuukaOCR.Core.Update;
 
 // Tiny dependency-free test runner: this project must build on a machine with no NuGet access.
 var tests = new List<(string Name, Action Body)>();
@@ -589,6 +591,232 @@ Test("AgentPrompts: history trimming respects the token budget", () =>
     True(trimmed.Count > 0, "the newest turn is always kept");
     True(trimmed.Sum(turn => AgentPrompts.TokensOf(turn.Text)) <= 700, "budget is respected");
     Equal(history[^1].Text, trimmed[^1].Text, "the newest turn survives");
+});
+
+// ------------------------------------------------------- window edge snapping
+Test("SliderSpecs: window edge snapping doubled its tick count", () =>
+{
+    // The request: half the old step (100 / 50 / 100), so twice as many ticks on the same range.
+    var proximityTop = SliderSpecs.Get(SliderSpecs.HookProximityTop);
+    var proximityBottom = SliderSpecs.Get(SliderSpecs.HookProximityBottom);
+    var offsetTop = SliderSpecs.Get(SliderSpecs.HookOffsetTop);
+    var offsetBottom = SliderSpecs.Get(SliderSpecs.HookOffsetBottom);
+    var unhook = SliderSpecs.Get(SliderSpecs.UnhookDistance);
+
+    Equal(50d, proximityTop.Step, "top snap range step");
+    Equal(50d, proximityBottom.Step, "bottom snap range step");
+    Equal(25d, offsetTop.Step, "top offset step");
+    Equal(25d, offsetBottom.Step, "bottom offset step");
+    Equal(50d, unhook.Step, "unhook distance step");
+
+    // 0..400 step 50 → 9 ticks (was 5); -100..100 step 25 → 9 (was 5); 0..600 step 50 → 13 (was 7).
+    Equal(9, (int)((proximityTop.Max - proximityTop.Min) / proximityTop.Step) + 1, "top tick count");
+    Equal(9, (int)((offsetTop.Max - offsetTop.Min) / offsetTop.Step) + 1, "offset tick count");
+    Equal(13, (int)((unhook.Max - unhook.Min) / unhook.Step) + 1, "unhook tick count");
+
+    // Defaults did not move: 100 px of snap range and no offset still mean what they meant before.
+    Equal(100d, proximityTop.Default, "top default");
+    Equal(100d, proximityBottom.Default, "bottom default");
+    Equal(0d, offsetTop.Default, "top offset default");
+    Equal(100d, unhook.Default, "unhook default");
+});
+
+Test("SliderSpecs: values saved by the old tick grid stay on the new one", () =>
+{
+    // Every value an older build could store is a multiple of the OLD step; the new grid is a
+    // refinement of it, so an existing settings.json must load without moving a single pixel.
+    var snapping = new[]
+    {
+        (Key: SliderSpecs.HookProximityTop, OldStep: 100),
+        (Key: SliderSpecs.HookProximityBottom, OldStep: 100),
+        (Key: SliderSpecs.HookOffsetTop, OldStep: 50),
+        (Key: SliderSpecs.HookOffsetBottom, OldStep: 50),
+        (Key: SliderSpecs.UnhookDistance, OldStep: 100)
+    };
+
+    foreach (var (key, oldStep) in snapping)
+    {
+        var spec = SliderSpecs.Get(key);
+        for (var value = spec.Min; value <= spec.Max; value += oldStep)
+        {
+            True(spec.IsOnGrid(value), $"{key}: old value {value} must still be a tick");
+            Equal(value, spec.Snap(value), $"{key}: old value {value} must not move");
+        }
+    }
+});
+
+// ------------------------------------------------------------- full text / theme
+Test("ThemeSettings: the shipped background opacity is 90 % and a saved value wins", () =>
+{
+    Equal(90, new ThemeSettings().BackgroundOpacity, "default opacity");
+    Equal(90, new AppSettings().Theme.BackgroundOpacity, "default opacity via settings");
+
+    // The default also has to be a real tick, or the slider thumb would sit at a nameless spot.
+    True(SliderSpecs.Get(SliderSpecs.BackgroundOpacity).IsOnGrid(90), "90 is on the opacity grid");
+
+    // A user value survives a save/load round trip: only a missing key gets the new default.
+    // (Normalize snaps onto the 10 % tick grid, exactly like every other slider-backed value.)
+    var saved = new ThemeSettings { BackgroundOpacity = 70 };
+    var json = JsonSerializer.Serialize(saved, Json.Options);
+    var loaded = JsonSerializer.Deserialize<ThemeSettings>(json, Json.Options)!;
+    loaded.Normalize();
+    Equal(70, loaded.BackgroundOpacity, "a stored opacity is preserved");
+});
+
+Test("WindowTracker: hooking keeps the bar where the user put it", () =>
+{
+    var window = new ScreenRect(100, 100, 1100, 900);   // left, top, right, bottom → 1000x800
+    var settings = new AppSettings();
+
+    var centred = WindowTracker.TargetFor(window, 200, 50, HookEdge.Bottom,
+        WindowTracker.ParseMode(settings.HookMode), settings.HookOffsetTop, settings.HookOffsetBottom);
+
+    var kept = WindowTracker.TargetFor(window, 200, 50, HookEdge.Bottom,
+        WindowTracker.ParseMode(settings.HookMode), settings.HookOffsetTop, settings.HookOffsetBottom,
+        barLeft: 700);
+
+    Equal(700d, kept.X, "the bar keeps its own left edge");
+    True(Math.Abs(centred.X - 500) < 0.001, "without a live bar the target is centred");
+    True(kept.Y == centred.Y, "the hook still owns the vertical axis");
+});
+
+// ---------------------------------------------------------------- action presets
+Test("AgentPreset: export then import restores order, names, icons and instructions", () =>
+{
+    var actions = new List<AgentAction>
+    {
+        new() { Id = "act-one", Name = "Translate", Icon = "translate", Instruction = "translate it" },
+        new() { Id = "act-two", Name = "Summarize", Icon = "summarize", Instruction = "sum it up" },
+        new() { Id = "act-three", Name = "Code", Icon = "code", Instruction = "explain the code" }
+    };
+
+    var json = AgentPreset.Export(actions, "2026-11-22T10:00:00Z");
+    True(json.Contains("\"format\": \"yuukaocr.actions\""), "the file names its format");
+    True(json.Contains("\"version\": 1"), "the file names its version");
+
+    var loaded = AgentPreset.Import(json);
+
+    True(loaded.Success, $"import must succeed: {loaded.ErrorKey}");
+    Equal(3, loaded.Actions.Count, "all three actions come back");
+    Equal("Translate,Summarize,Code",
+        string.Join(",", loaded.Actions.Select(a => a.Name)), "order is preserved");
+    Equal("translate", loaded.Actions[0].Icon, "icon is preserved");
+    Equal("sum it up", loaded.Actions[1].Instruction, "instruction is preserved");
+
+    // Ids are regenerated: a preset is content, and importing twice must not clone an id.
+    True(loaded.Actions.All(a => !actions.Any(original => original.Id == a.Id)), "ids are fresh");
+    Equal(loaded.Actions.Count, loaded.Actions.Select(a => a.Id).Distinct().Count(), "ids are unique");
+});
+
+Test("AgentPreset: every broken file is refused with its own reason", () =>
+{
+    Equal(AgentPreset.ErrorEmpty, AgentPreset.Import("").ErrorKey, "empty text");
+    Equal(AgentPreset.ErrorEmpty, AgentPreset.Import("   ").ErrorKey, "whitespace only");
+    Equal(AgentPreset.ErrorJson, AgentPreset.Import("{ not json").ErrorKey, "invalid json");
+    Equal(AgentPreset.ErrorFormat, AgentPreset.Import("{\"format\":\"other\",\"version\":1,\"actions\":[]}").ErrorKey,
+        "wrong format");
+    Equal(AgentPreset.ErrorVersion, AgentPreset.Import(
+        "{\"format\":\"yuukaocr.actions\",\"version\":99,\"actions\":[{\"name\":\"a\",\"instruction\":\"b\"}]}").ErrorKey,
+        "newer version");
+    Equal(AgentPreset.ErrorCount, AgentPreset.Import(
+        "{\"format\":\"yuukaocr.actions\",\"version\":1,\"actions\":[]}").ErrorKey, "no actions");
+
+    var tooMany = string.Join(",", Enumerable.Range(0, AgentActions.Max + 1)
+        .Select(i => $"{{\"name\":\"a{i}\",\"icon\":\"chat\",\"instruction\":\"x\"}}"));
+    Equal(AgentPreset.ErrorCount, AgentPreset.Import(
+        $"{{\"format\":\"yuukaocr.actions\",\"version\":1,\"actions\":[{tooMany}]}}").ErrorKey, "too many actions");
+
+    // A refusal never hands back a half-built table.
+    True(!AgentPreset.Import("{ not json").Actions.Any(), "nothing is returned on failure");
+});
+
+// ------------------------------------------------------------------ app version
+Test("AppVersion: real release tags parse and order correctly", () =>
+{
+    True(AppVersion.TryParse("v2.1.0", out var tag) && tag == new AppVersion(2, 1, 0, 0), "v-prefixed tag");
+    True(AppVersion.TryParse("2.1", out var short1) && short1 == new AppVersion(2, 1, 0, 0), "two components");
+    True(AppVersion.TryParse("2.2.0-beta.1", out var beta) && beta == new AppVersion(2, 2, 0, 0), "pre-release");
+    True(AppVersion.TryParse("2.2.0+build.7", out var meta) && meta == new AppVersion(2, 2, 0, 0), "build metadata");
+
+    True(!AppVersion.TryParse("latest", out _), "a non-number is refused");
+    True(!AppVersion.TryParse("", out _), "empty is refused");
+    True(!AppVersion.TryParse("2.x.0", out _), "a bad component is refused");
+
+    True(new AppVersion(2, 2, 0, 0) > new AppVersion(2, 1, 0, 0), "2.2 > 2.1");
+    True(new AppVersion(2, 1, 0, 0) >= new AppVersion(2, 1, 0, 0), "equal compares as >=");
+    Equal("2.1.0", new AppVersion(2, 1, 0, 0).ToString(), "display form");
+});
+
+// --------------------------------------------------------------- update checks
+Test("GitHubUpdateService: a release document is interpreted, not trusted", () =>
+{
+    using var log = new LogService(Path.Combine(Path.GetTempPath(), "yuukaocr-test-log.json"));
+    using var updater = new GitHubUpdateService(log, "2.1.0");
+
+    var newer = updater.Interpret("""
+    {
+      "tag_name": "v2.2.0",
+      "assets": [
+        { "name": "notes.txt", "browser_download_url": "https://example.invalid/notes.txt", "size": 10 },
+        { "name": "YuukaOCR-2.2.0-win-x64.zip", "browser_download_url": "https://example.invalid/a.zip", "size": 100 }
+      ]
+    }
+    """);
+
+    True(newer.Completed, "the answer was readable");
+    True(newer.UpdateAvailable, "a higher tag is an update");
+    True(newer.CanInstall, "the win-x64 package is picked");
+    Equal("YuukaOCR-2.2.0-win-x64.zip", newer.Asset!.Name, "the zip, not the notes");
+    Equal("2.2.0", newer.LatestVersion, "version text");
+
+    var same = updater.Interpret("{\"tag_name\":\"2.1.0\",\"assets\":[]}");
+    True(same.Completed && !same.UpdateAvailable, "an equal version is up to date");
+    Equal(GitHubUpdateService.KeyUpToDate, same.MessageKey, "up-to-date message");
+
+    var older = updater.Interpret("{\"tag_name\":\"v2.0.9\",\"assets\":[]}");
+    True(!older.UpdateAvailable, "an older release is not an update");
+
+    var noTag = updater.Interpret("{\"assets\":[]}");
+    Equal(GitHubUpdateService.KeyBadTag, noTag.MessageKey, "a release without a tag is refused");
+
+    var noAsset = updater.Interpret("{\"tag_name\":\"v2.3.0\",\"assets\":[]}");
+    True(noAsset.UpdateAvailable && !noAsset.CanInstall, "no package means nothing to install");
+    Equal(GitHubUpdateService.KeyNoAsset, noAsset.MessageKey, "and it says so");
+
+    Equal(GitHubUpdateService.KeyBadTag, updater.Interpret("not json at all").MessageKey, "garbage is refused");
+});
+
+Test("GitHubUpdateService: the repository comes from the git remote", () =>
+{
+    True(GitHubUpdateService.TryParseRepository("https://github.com/HoangShiro/YuukaOCR.git",
+        out var owner, out var repository), "https remote");
+    Equal("HoangShiro", owner, "owner");
+    Equal("YuukaOCR", repository, "repository");
+
+    True(GitHubUpdateService.TryParseRepository("git@github.com:Someone/Other.git",
+        out owner, out repository), "ssh remote");
+    Equal("Someone", owner, "ssh owner");
+    Equal("Other", repository, "ssh repository");
+
+    True(!GitHubUpdateService.TryParseRepository("https://gitlab.com/a/b.git", out _, out _), "other host");
+    True(!GitHubUpdateService.TryParseRepository("", out _, out _), "no remote");
+});
+
+Test("GitHubUpdateService: the installer leaves user data alone", () =>
+{
+    var script = GitHubUpdateService.InstallerScript(
+        @"C:\Temp\YuukaOCR-2.2.0-win-x64.zip", @"C:\Apps\YuukaOCR", "YuukaOCR.exe", 4242, @"C:\Temp\install.log");
+
+    True(script.Contains("$appPid = 4242"), "it knows which process to wait for");
+    True(script.Contains("Wait-Process -Id $appPid"), "it waits for this process to exit");
+    True(script.Contains("Expand-Archive"), "it unpacks the package");
+    True(script.Contains("'user'"), "user/ is dropped from the staged copy");
+    True(script.Contains("Start-Process"), "it restarts the app afterwards");
+    True(script.Contains("Copy-Item"), "it copies over the install folder");
+
+    // A path with a quote must not be able to break out of the PowerShell literal.
+    var quoted = GitHubUpdateService.InstallerScript(@"C:\it's\a.zip", @"C:\Apps", "YuukaOCR.exe", 1, "log.txt");
+    True(quoted.Contains("'C:\\it''s\\a.zip'"), "single quotes are doubled");
 });
 
 // ---------------------------------------------------------------------- run all

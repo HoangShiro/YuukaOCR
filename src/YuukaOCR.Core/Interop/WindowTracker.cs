@@ -121,6 +121,11 @@ public static class WindowTracker
     /// Where the bar goes for a given window and edge. The result is always inside the monitor's work
     /// area: a fullscreen or maximised window has no room past its outer edge, so an outside target
     /// that would land off-screen flips to the inner edge instead of being pushed under the taskbar.
+    ///
+    /// <paramref name="barLeft"/> is the bar's current left edge. When it is given, the horizontal
+    /// position is kept exactly as the user left it — hooking must not slide the bar to the middle of
+    /// the target's edge. Only the axis the hook owns (vertical) is computed here; null falls back to
+    /// centring, which is what a caller without a live window (a test, a probe) wants.
     /// </summary>
     public static (double X, double Y) TargetFor(
         ScreenRect window,
@@ -129,7 +134,8 @@ public static class WindowTracker
         HookEdge edge,
         HookMode mode,
         int offsetTop,
-        int offsetBottom)
+        int offsetBottom,
+        double? barLeft = null)
     {
         var area = ScreenGeometry.WorkAreaAt(window.Left + window.Width / 2, window.Top + window.Height / 2);
 
@@ -151,7 +157,7 @@ public static class WindowTracker
             if (y < area.Top) y = window.Top + offsetBottom;
         }
 
-        var x = window.Left + (window.Width - barWidth) / 2.0;
+        var x = barLeft ?? window.Left + (window.Width - barWidth) / 2.0;
 
         x = Math.Clamp(x, area.Left, Math.Max(area.Left, area.Right - barWidth));
         y = Math.Clamp(y, area.Top, Math.Max(area.Top, area.Bottom - barHeight));
@@ -174,7 +180,8 @@ public static class WindowTracker
         int offsetTop,
         int offsetBottom,
         IntPtr selfHandle,
-        HookMode mode = HookMode.Outside)
+        HookMode mode = HookMode.Outside,
+        bool keepHorizontalPosition = false)
     {
         var barRight = barLeft + barWidth;
         var barBottom = barTop + barHeight;
@@ -226,7 +233,8 @@ public static class WindowTracker
 
             if (distance >= bestDistance) return true;
 
-            var (targetX, targetY) = TargetFor(window, barWidth, barHeight, edge, mode, offsetTop, offsetBottom);
+            var (targetX, targetY) = TargetFor(window, barWidth, barHeight, edge, mode, offsetTop, offsetBottom,
+                keepHorizontalPosition ? barLeft : null);
 
             bestDistance = distance;
             best = new HookCandidate(handle, edge, targetX, targetY, window, ProcessNameOf(handle));

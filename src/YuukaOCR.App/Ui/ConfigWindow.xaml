@@ -4,6 +4,7 @@
         xmlns:tabs="clr-namespace:YuukaOCR.App.Ui.Tabs"
         xmlns:ui="clr-namespace:YuukaOCR.App.Ui.Localization"
         Title="{ui:Tr window.config.title}" Width="980" Height="720"
+        Icon="pack://application:,,,/YuukaOCR;component/Assets/app-icon.png"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         WindowStartupLocation="CenterScreen" ShowInTaskbar="True" ResizeMode="CanResize"
         MinWidth="820" MinHeight="580" SnapsToDevicePixels="True" UseLayoutRounding="True">

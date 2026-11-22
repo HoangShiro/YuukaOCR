@@ -59,12 +59,19 @@ public partial class ResultWindow : Window, IThemedWindow
     /// </summary>
     private string _actionSignature = "";
 
+    /// <summary>Unhooks the floating copy button's lifetime rules when the bubble is destroyed.</summary>
+    private readonly IDisposable _selectionTracker;
+
     public ResultWindow(AppServices services)
     {
         _services = services;
 
         InitializeComponent();
         SelectionPopup.PlacementTarget = ResultBox;
+
+        // The floating copy button has to vanish when the selection stops being the thing in focus:
+        // window deactivated, focus moved on, or a click elsewhere in the bubble.
+        _selectionTracker = SelectionCopy.Track(ResultBox, SelectionPopup);
 
         _services.Agent.HistoryChanged += OnAgentHistoryChanged;
         _services.Agent.ThinkingChanged += OnAgentThinkingChanged;
@@ -595,6 +602,7 @@ public partial class ResultWindow : Window, IThemedWindow
     {
         _animTimer.Stop();
         _hintTimer.Stop();
+        _selectionTracker.Dispose();
         _services.Agent.HistoryChanged -= OnAgentHistoryChanged;
         _services.Agent.ThinkingChanged -= OnAgentThinkingChanged;
         AppearanceSync.Unregister(this);

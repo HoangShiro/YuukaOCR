@@ -55,6 +55,37 @@ public partial class App : Application
         // Runs after the bar is up, so a slow provider never delays the window: a missing or rejected key
         // opens Settings → System with the reason above the key input.
         _ = CheckApiKeyAsync(main);
+
+        // Update check runs beside it, in the background: an unreachable GitHub must never delay or
+        // interrupt startup, and an up-to-date install says nothing at all.
+        _ = CheckUpdatesAsync(main);
+    }
+
+    /// <summary>
+    /// Startup update check. Deliberately fire-and-forget: no dialog, no blocking, and the only visible
+    /// effect is a line in the bar status plus the settings section it already fills in.
+    /// </summary>
+    private static async Task CheckUpdatesAsync(MainWindow main)
+    {
+        var services = Services;
+
+        try
+        {
+            var check = await services.CheckForUpdatesAsync();
+            if (check?.CanInstall != true) return;
+
+            // One announcement per release: a restart must not nag about the same version.
+            var notified = services.Settings.Settings.UpdateNotifiedVersion;
+            if (string.Equals(notified, check.LatestVersion, StringComparison.Ordinal)) return;
+
+            services.Settings.Update(s => s.UpdateNotifiedVersion = check.LatestVersion ?? "");
+            main.ShowStatus(L.F("upd.available", check.LatestVersion), 8000);
+        }
+        catch (Exception ex)
+        {
+            // Never let an update check take the app down; the reason is in the console stream.
+            services.Log.ConsoleLog(L.F("app.uiError", ex.Message));
+        }
     }
 
     /// <summary>

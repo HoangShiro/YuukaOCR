@@ -20,6 +20,14 @@ public sealed partial class ApiKeyPool
 
     public static string EnvKeyFor(string providerId) => ProviderRegistry.Get(providerId).EnvKey;
 
+    /// <summary>
+    /// One raw value from user/.env, for entries that are not provider keys — <c>GITHUB_TOKEN</c> is the
+    /// only one today. Goes through the same parser as the key pool, so there is still exactly one
+    /// place that knows the file format.
+    /// </summary>
+    public static string ReadValue(string envPath, string key) =>
+        ReadEnv(envPath).TryGetValue(key, out var value) ? value.Trim() : "";
+
     public static Dictionary<string, List<string>> LoadAll(string envPath)
     {
         var kv = ReadEnv(envPath);

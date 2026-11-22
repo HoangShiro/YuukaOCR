@@ -12,5 +12,5 @@
   "BounceDampingFactor": 0.3,
   "HookOcrHotkey": "middle",
   "DefaultProvider": "gemini",
-  "DefaultPrompt": "LUÔN LUÔN dịch text sang tiếng việt với tone phù hợp với ngữ cảnh/giọng điệu/ngôn ngữ trẻ trung/anime. Chỉ trả về duy nhất text được dịch."
+  "DefaultPrompt": "ALWAYS translate the text into Vietnamese, keeping a tone that fits the context, the speaker's tone and a youthful, anime-style register. Return only the translated text."
 }

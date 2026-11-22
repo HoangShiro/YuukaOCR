@@ -40,7 +40,7 @@ Architecture in detail: see [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md).
 ```powershell
 dotnet build YuukaOCR.slnx -c Release
 dotnet run --project src/YuukaOCR.App            # run the dev build
-dotnet run --project tests/YuukaOCR.Tests        # 42 tests
+dotnet run --project tests/YuukaOCR.Tests        # 52 tests
 pwsh ./build.ps1                                 # publish into publish/
 pwsh ./build.ps1 -SelfContained                  # bundle the runtime, no .NET install needed
 ```
@@ -49,12 +49,45 @@ Publish output:
 
 ```
 publish/
-├─ YuukaOCR.exe          ← double-click this
+├─ YuukaOCR.exe          ← double-click this (icon comes from Assets/app.ico)
 ├─ YuukaOCR.dll, YuukaOCR.Core.dll, *.json
 ├─ Assets/ui.png
 ├─ config/app_configs.json
 └─ user/                 ← created on first run
 ```
+
+### App icon
+
+`Assets/app.ico` and `Assets/app-icon.png` are generated from the master artwork
+`Assets/18 thg 8 2026.png` by `tools/makeicon.py` — stdlib only (`zlib` + `struct`), because the
+solution takes no packages: a PNG decoder, an area-average downscaler, a rounded-corner mask and an
+ICO writer.
+
+```powershell
+python tools/makeicon.py           # regenerate both files (~5 s)
+python tools/makeicon.py --check   # non-zero exit when they are out of date
+```
+
+| File | Role |
+| --- | --- |
+| `Assets/18 thg 8 2026.png` | Master artwork. Never modified, never shipped |
+| `Assets/app.ico` | 16, 20, 24, 32, 40, 48, 64, 96 (DIB) + 128, 256 (PNG) — Explorer, taskbar, shortcuts, title bar |
+| `Assets/app-icon.png` | 256×256 RGBA — `Icon=` of every window (title bar, Alt+Tab) |
+
+The artwork is a square tile, so the generator rounds it: a corner radius of 20 % of the side
+(51 px at 256, 3 px at 16), masked with 4×4 sub-samples per pixel so the arc is anti-aliased at every
+size instead of stair-stepping, and everything outside the arc is transparent. A hard 90° corner
+reads as a white sticker on a dark taskbar — that is the whole reason the mask exists. The
+`--check` run decodes the generated PNG and fails unless the four corners are fully transparent, the
+centre is fully opaque and some pixels along the arc are partly transparent, so a regenerate that
+loses the alpha channel is caught instead of shipped.
+
+The PNG entries carry the alpha channel directly; the DIB entries of the small sizes carry it in
+their 32-bit pixels and repeat it in the 1-bit AND mask (a set bit means transparent), because a
+renderer that ignores the alpha channel would otherwise paint the rounded corner black. The `.ico` is
+wired through `<ApplicationIcon>`; the PNG is a `<Resource>` referenced as
+`pack://application:,,,/YuukaOCR;component/Assets/app-icon.png` (assembly-qualified, so the layout
+harness can load the same window it checks). Replace the master, re-run the script, commit both files.
 
 The target machine needs the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0).
 To copy the app to another machine with nothing installed: `pwsh ./build.ps1 -SelfContained`.
@@ -88,12 +121,16 @@ To copy the app to another machine with nothing installed: `pwsh ./build.ps1 -Se
    and follows that window. *Settings → Hooking → Hook mode* switches between **Outside** (the bar sits
    just past the window edge) and **Inside** (it stays within the window, which is what a fullscreen
    app needs); the target is always clamped to the monitor, so the bar cannot end up off-screen.
+   Attaching **keeps the bar where you put it**: only the axis the hook owns is computed, the other one
+   is left alone, so a bar sitting at the right end of a window does not jump to the middle.
 
 ### The result bubble
 
 * **The text is selectable.** Select any part of it and a small accent-filled copy button appears
-  next to the selection — that copies exactly what you picked. The icon-only **copy** button in the
-  bottom-right corner (under **close**) copies the whole result.
+  next to the selection — that copies exactly what you picked. It disappears again as soon as the
+  selection is cleared, the bubble loses focus, or you click anywhere else in it, so it never floats
+  over text it no longer points at. The icon-only **copy** button in the bottom-right corner (under
+  **close**) copies the whole result.
 * **The action bar** along the bottom holds your registered action buttons (icon-only, up to 10) and
   a chat box. Chat and actions use either the **whole result** or **just the selected text** — a
   selection switches the scope automatically, and the little label next to the input shows which one
@@ -103,6 +140,9 @@ To copy the app to another machine with nothing installed: `pwsh ./build.ps1 -Se
   in Vietnamese?" works right after "summarize this".
 * The conversation is shared with every bubble and survives a restart (`chat_history` in
   `user/log.json`); *Settings → History → Chat history* shows it in order.
+* **Drag the action tabs** in *Settings → Prompt/Agent → Actions* to reorder them; the Action Bar in
+  every open bubble is rebuilt in the same order before the mouse button is released, and the order is
+  saved with the actions (`actions` in `user/settings.json`), so it survives a restart.
 * Adding, renaming or removing an action in *Settings → Prompt/Agent* changes the bar **immediately**:
   the settings store raises `Changed`, `AppearanceSync` fans it out, and the bubble rebuilds its
   buttons — no restart, no reopening the bubble.
@@ -129,12 +169,12 @@ filled from the provider and ranked:
 
 | Tab | Contents |
 | --- | --- |
-| **System** | Provider, base URL and model on one row (wraps when the window is narrow) — the model field is the searchable picker described above, the list fills itself and *Refresh* re-reads it; multiple API keys with per-row *copy* / *remove* icons, hotkey, start with Windows, auto-update, clipboard flags. This is also the tab the startup key check opens. |
+| **System** | Provider, base URL and model on one row (wraps when the window is narrow) — the model field is the searchable picker described above, the list fills itself and *Refresh* re-reads it; multiple API keys with per-row *copy* / *remove* icons, hotkey, start with Windows, clipboard flags. **Update** shows the installed version, the latest release, the status, *Check for updates*, *Download & install* and — in a git checkout only — *Update with git*. This is also the tab the startup key check opens. |
 | **Appearance** | UI language (10 languages: English, Tiếng Việt, 日本語, 한국어, 简体中文, Español, Français, Deutsch, Русский, Português), 8 theme presets, frame + background opacity, font, font size, custom bar image, UI scale |
 | **Layout** | Result bubble direction (D-pad + Auto), **Test** — shows the bubble at the current position so the placement can be checked without running an OCR — spacing, minimum width, clear saved positions |
 | **Hooking** | Hook mode (Outside / Inside), top/bottom snap zones, vertical offset, release distance, spring stiffness, damping, bounce |
-| **Prompt/Agent** | **OCR** — the OCR prompt (moved here from System and renamed from *Custom prompt*; same `custom_prompt` key) and its enable toggle. **Agent** — instruction/persona, provider + model on one row (empty = follow the OCR provider), temperature + context-token budget on one row. **Actions** — a browser-style tab strip with a `+` button; each tab picks an icon and holds the action instruction (max 10) |
-| **History** | *Recent results* and *Prompts used* side by side, *Chat history* below. Every row is selectable text with a floating copy button plus icon-only **copy / expand / remove** buttons at the bottom right; expand grows the row to its full content and flips to collapse |
+| **Prompt/Agent** | **OCR** — the OCR prompt (moved here from System and renamed from *Custom prompt*; same `custom_prompt` key) and its enable toggle. **Agent** — instruction/persona, provider + model on one row (empty = follow the OCR provider), temperature + context-token budget on one row. **Actions** — a browser-style tab strip with a `+` button; each tab picks an icon and holds the action instruction (max 10); drag a tab to reorder, `import`/`export` at the end of the strip. Every prompt field carries the same two icon buttons: **expand** (Full Text Edit Mode) and **reset** (back to the shipped default) |
+| **History** | *Recent results* and *Prompts used* side by side, *Chat history* below. Every row is selectable text with a floating copy button plus icon-only **copy / expand / remove** buttons at the bottom right; expand opens the entry in **Full Text Edit Mode, read-only**, so long results can be read and copied whole — *Done* or *Back* returns without touching the stored entry |
 | **Status** | API calls per model, uptime, per-source statistics |
 | **Console** | Live log lines |
 
@@ -144,6 +184,46 @@ on the same tab, and the bar, tooltips, dialogs and log messages follow. The cho
 in English, and an unknown code falls back to it too. Every table must hold exactly the English key
 set; the test runner fails when one drifts, and it also fails when a language is offered in the menu
 without a table behind it.
+
+### Full Text Edit Mode
+
+One window (`Ui/FullTextWindow.xaml`) serves every "this text is too long for its box" case — the three
+prompt fields, the action instruction and the history entries. From *Settings* it covers the whole
+settings window; from the bar it centres itself on the monitor.
+
+* **Back** (top left) closes it and **returns the text exactly as it was** — nothing is applied, nothing
+  is discarded.
+* **Done** (bottom right) is the only thing that writes: the editor hands the text back to the field
+  that opened it, which then saves it through the normal path (so the debounced store, the `Changed`
+  fan-out and the Action Bar rebuild all still happen).
+* Read-only mode (history) hides *Done*, keeps the text selectable and copies through the usual
+  floating copy button.
+
+### Action presets
+
+*Settings → Prompt/Agent → Actions* ends with two icon-only buttons:
+
+| Button | Effect |
+| --- | --- |
+| **export** | Writes the current action tabs to a `.json` preset, `yuukaocr-actions-{yyyyMMdd-HHmm}.json` by default |
+| **import** | Asks for confirmation (*"all existing action tabs will be replaced"*), then replaces every action with the file's content |
+
+```json
+{
+  "format": "yuukaocr.actions",
+  "version": 1,
+  "exported_at": "2026-11-22T10:00:00Z",
+  "actions": [
+    { "name": "Translate", "icon": "translate", "instruction": "Translate the context into ..." },
+    { "name": "Summarize", "icon": "summarize", "instruction": "Summarize the context in ..." }
+  ]
+}
+```
+
+Order is the array order — that is the tab order and the Action Bar order. Ids are **not** stored: a
+preset is content, and a fresh id per action keeps two imports from ever colliding. Import is
+all-or-nothing: a file that is empty, not JSON, of another `format`, of a newer `version`, with zero
+actions or more than 10 is refused with its own message and the current tabs are left untouched.
 
 ### Themes
 
@@ -155,7 +235,9 @@ hover, border and on-accent colours are derived from them, so a theme can never 
 
 The two sliders under **Transparency** control the floating frame and the window backgrounds
 independently (`frame_opacity` / `background_opacity`, 20–100%). They are stored in
-`user/settings.json` as plain numbers, so the file stays readable and hand-editable.
+`user/settings.json` as plain numbers, so the file stays readable and hand-editable. The shipped
+background opacity is **90 %** — applied only when the key is missing, so an existing value is never
+rewritten by an upgrade.
 
 Every slider in the settings window is **discrete**: it snaps to fixed steps and prints the step
 values under the track, so a value is always a number you can name instead of a position you have to
@@ -166,13 +248,43 @@ The slider chrome is deliberately chunky: an 8 DIP track you can actually hit, a
 (the ellipse is 18 DIP — a shorter row used to clip its top and bottom), and 3 DIP tick marks that
 start below the thumb instead of behind it. On a crowded slider (0–32000 by 4000, 0–600 by 50 …)
 every second mark is drawn at 38 % so the steps stay countable; the *Window edge snapping* sliders in
-**Hooking** ask for doubled marks (6 DIP) through `controls:SliderTicks.Thickness`. A slider's height
+**Hooking** ask for doubled marks (6 DIP) through `controls:SliderTicks.Thickness`. Those five snapping
+sliders step **50 / 25 / 50 px** — half the old steps, so twice the ticks over the same range and no
+value an older build stored can fall between two marks. A slider's height
 is never fixed: it measures its own thumb row plus tick row, which is also what keeps the labels from
 clipping at 125 % or 150 %.
 
 Appearance changes reach **every window immediately**, including the result bubble: all windows
 repaint through one central subscription (`Ui/AppearanceSync.cs`), so a new window only has to
 implement `IThemedWindow` and register itself.
+
+---
+
+## Updates
+
+Every start compares the running version against the latest **GitHub release** of
+`HoangShiro/YuukaOCR`. The repository and its tag scheme are read from the checkout (`git remote`,
+`GitUpdateService.RemoteUrl`) rather than hardcoded, so a fork follows its own releases.
+
+| Piece | Where |
+| --- | --- |
+| Version comparison | `Core/Update/AppVersion.cs` — lenient 4-component parse (`v2.1.0`, `2.1`, `2.2.0-beta.1`, `2.2.0+build.7`) |
+| Check / download / install | `Core/Update/GitHubUpdateService.cs` — `GET /repos/{owner}/{repo}/releases/latest` |
+| UI | *Settings → System → Update* (installed version, latest version, status, *Check*, *Download & install*) |
+| Startup check | `App.xaml.cs` — fire and forget; a failure only reaches the log |
+
+* A release is "newer" only when its tag parses **and** is greater; equal or older shows *up to date*.
+* The download asset is the first `.zip` whose name contains `win-x64` (that is what
+  `build.ps1` publishes); a release without one still reports the version, with *install* disabled.
+* The zip is unpacked to a temp folder, the `user/` folder of the package is dropped, the install
+  folder is overwritten, and the app restarts itself. **`user/` — settings, `.env`, `log.json`,
+  action presets — is never touched.**
+* A token may be supplied as `GITHUB_TOKEN` in `user/.env` for the (private) API; it is read through
+  the same `.env` parser as the provider keys and is never logged.
+* Nothing about an update check can delay or break startup: the check is off the UI thread, has a
+  short timeout, and every failure is a message in the Update section instead of an exception.
+* In a development checkout the old `git pull --ff-only` path is still offered as *Update with git*
+  (it stashes local changes and restores them); a published build does not see that button.
 
 ---
 
@@ -222,7 +334,8 @@ this build still reads that file on first run.
 | "Could not read the returned result!" | The model did not answer with text/JSON — check the History tab, try another model |
 | Chat or an action does nothing | The agent has no key for its provider (empty provider = follow the OCR one). `YUUKA_API_DEBUG=1` writes `user/api-debug.log` with the exact request and the provider's error |
 | Pasted result is duplicated | Turn off *Process text in the clipboard* if you do not want the app to read its own output |
-| Update fails | The app uses `git pull --ff-only` and keeps local changes; see the message in the System tab |
+| Update check says *unavailable* | GitHub was unreachable or rate limited — nothing else changes; press *Check for updates* again later |
+| Update has no install button | The latest release has no `win-x64` `.zip` asset. In a checkout, *Update with git* does the same job with `git pull --ff-only` (local changes are stashed and restored) |
 
 ---
 

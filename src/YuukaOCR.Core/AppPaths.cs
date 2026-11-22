@@ -24,6 +24,14 @@ public static class AppPaths
 
     private static string ResolveRoot()
     {
+        // Tools and probes point this at a throwaway folder: the layout harness saves settings and chat
+        // turns, and it must never rewrite the user's own user/ directory.
+        var isolated = Environment.GetEnvironmentVariable("YUUKA_ROOT");
+        if (!string.IsNullOrWhiteSpace(isolated))
+        {
+            return Path.GetFullPath(isolated.Trim());
+        }
+
         var baseDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
 
         // Published build: config/app_configs.json sits next to the exe, so use that very folder.

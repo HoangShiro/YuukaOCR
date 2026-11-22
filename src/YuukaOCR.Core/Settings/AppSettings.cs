@@ -22,6 +22,13 @@ public sealed class AppSettings
     // --- behaviour ------------------------------------------------------------
     [JsonPropertyName("auto_update_enabled")] public bool AutoUpdateEnabled { get; set; } = true;
     [JsonPropertyName("start_with_system")] public bool StartWithSystem { get; set; }
+    /// <summary>
+    /// The release version the user was last told about, e.g. "2.2.0". Empty means "never told".
+    /// The startup check writes this after reporting an update, so the same release is not announced
+    /// on every launch. It is *not* a "checked" marker: the check itself still runs on every start —
+    /// only the repeated notification is suppressed.
+    /// </summary>
+    [JsonPropertyName("update_notified_version")] public string UpdateNotifiedVersion { get; set; } = "";
     [JsonPropertyName("process_text_clipboard")] public bool ProcessTextClipboard { get; set; }
     [JsonPropertyName("process_file_clipboard")] public bool ProcessFileClipboard { get; set; } = true;
     [JsonPropertyName("process_image_clipboard")] public bool ProcessImageClipboard { get; set; } = true;
@@ -104,6 +111,7 @@ public sealed class AppSettings
         RecentProviders ??= new();
         RecentModels ??= new();
         Language = Localization.L.Normalize(Language);
+        UpdateNotifiedVersion = (UpdateNotifiedVersion ?? "").Trim();
         Theme.Normalize();
         Agent.Normalize();
         NormalizeActions();

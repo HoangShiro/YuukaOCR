@@ -46,7 +46,7 @@ providers, file loading) is testable without opening a window.
 | --- | --- |
 | `AppConfig.cs` | Contents of `config/app_configs.json`: default UI image, maximum file size, accepted extensions, default prompt/hotkey. Has `Save()`. The button colours moved into the theme palette, so a preset switch cannot leave a stray pill behind. |
 | `AppSettings.cs` | User settings (`user/settings.json`): window position per monitor configuration, UI scale, physics, hooking (+ `hook_mode`), hotkey, provider/model, UI language, clipboard flags, OCR prompt (`custom_prompt`), theme, `agent`, `actions`. `Normalize()` snaps every slider-backed value onto its tick grid (via `SliderSpecs`), repairs `hook_mode`, and normalizes the agent block and the action table. |
-| `SliderSpecs.cs` | The **one table** of slider ranges: `SliderSpec(key, min, max, step, default, decimals)` with `Snap` / `IsOnGrid` / `Format`, plus `SliderSpecs.All/Get/TryGet/Snap/Default`. The settings window binds every slider to it (`Ui/Controls/SliderSetup`), and `Normalize()` snaps stored values with it — so the range on screen and the range the clamp accepts cannot disagree, and every default sits exactly on a tick (a test asserts it). |
+| `SliderSpecs.cs` | The **one table** of slider ranges: `SliderSpec(key, min, max, step, default, decimals)` with `Snap` / `IsOnGrid` / `Format`, plus `SliderSpecs.All/Get/TryGet/Snap/Default`. The settings window binds every slider to it (`Ui/Controls/SliderSetup`), and `Normalize()` snaps stored values with it — so the range on screen and the range the clamp accepts cannot disagree, and every default sits exactly on a tick (a test asserts it). Two groups changed in this round: `BackgroundOpacity` now ships **90** (still only for a file without the key), and the five *Window edge snapping* sliders halved their steps — `HookProximityTop/Bottom` 50, `HookOffsetTop/Bottom` 25, `UnhookDistance` 50 — so they carry twice the ticks over the same range while every value an older build could store stays on the grid. |
 | `AgentSettings.cs` | The agent's own settings: `Instruction` (persona/system prompt), `Provider`, `Model` (empty = follow the OCR configuration), `Temperature`, `ContextTokens` (history budget) + `Normalize()`/`Clone()`. |
 | `SettingsStore.cs` | Load/save + raises `Changed`. Writes are debounced by 700 ms so dragging a slider does not produce 60 file writes. |
 | `ThemeSettings.cs` | Appearance choices: the active `preset`, `frame_opacity`, `background_opacity`, font family + size. `Normalize()` repairs a hand-edited file (unknown preset → default, opacity and font size **snapped to their slider ticks**), and `Bar`/`Background` fold the opacities into the palette colours. |
@@ -85,6 +85,7 @@ providers, file loading) is testable without opening a window.
 | --- | --- |
 | `AgentAction.cs` | One registered action: `Id`, `Name`, `Icon` (a **key**, never a WPF object), `Instruction`. `AgentActions` holds `Max = 10`, the icon whitelist, `NormalizeIcon`, `NewId()` and the three seeds a brand-new settings file starts with. |
 | `AgentPrompts.cs` | Pure composition, no I/O: `ChatTurn`/`AgentReply`, `TokensOf` (≈4 chars per token), `SystemPrompt(instruction, context?, label?)`, `TrimHistory(turns, budget)` and `ComposeAction(instruction, label, context)`. Trimming drops the oldest turns first and truncates a single oversized turn instead of losing it. |
+| `AgentPreset.cs` | The action preset file: `Export(actions, timestamp)` / `Import(json)` → `PresetResult(Success, Actions, ErrorKey, ErrorArg)`, `Format = "yuukaocr.actions"`, `Version = 1`, `SuggestedFileName()`. Total parsing — every failure is a localization key, never an exception, and nothing is returned unless the whole document is valid. Ids are deliberately not exported (a preset is content; the importer mints fresh ones). |
 | `AgentService.cs` | The conversation itself: one `SemaphoreSlim` gate, the shared history (restored from `user/log.json` on construction), `AskAsync` (chat box) and `RunActionAsync` (action buttons), provider/key/model resolution per request, `ThinkingChanged` / `HistoryChanged`, `ClearHistory`, `RemoveTurn`. Chat turns put the OCR context in the **system** prompt; an action turn puts its instruction + context in the **user** turn, so the text is never sent twice. An empty agent model follows the OCR model *only* while the agent also follows the OCR provider — a model id belongs to one provider. |
 
 ### 2.6 `Interop/` (Win32)
@@ -129,7 +130,9 @@ reopens it on the tab the user was on) instead of re-binding every label.
 | `Logging/ActivityLog.cs` | JSON model of `user/log.json` (`api_calls`, `recent_outputs`, `recent_prompts`, `chat_history`, …). `MaxChatEntries = 200`. |
 | `Logging/ApiTrace.cs` | Opt-in request/response trace to `user/api-debug.log`, enabled only by `YUUKA_API_DEBUG=1` (anything but `0`/`false`). Off by default so a shipped build carries no payloads; `build.ps1` deletes stray trace files. |
 | `Physics/SpringMotion.cs` | Spring integration with a fixed 16 ms step + edge clamping + bounce. |
-| `Update/GitUpdateService.cs` | `git fetch/rev-parse/pull --ff-only`, stash before pulling, restore the stash if the pull fails. |
+| `Update/AppVersion.cs` | Lenient 4-component version (`v2.1.0`, `2.1`, `2.2.0-beta.1`, `2.2.0+build.7`), `TryParse`, `From(Version)`, `IComparable`. A tag that does not parse is never "newer". |
+| `Update/GitHubUpdateService.cs` | The release-based updater: `CheckAsync` (`GET /repos/{owner}/{repo}/releases/latest`), `Interpret(json)` (pure, so the test runner can feed it documents), asset pick (`*.zip` containing `win-x64`), `DownloadAsync` with `Progress<double>`, zip validation, `InstallerScript` + `Install` (unpack → drop the package's `user/` → overwrite → restart). Also `TryParseRepository` (https and `git@` remotes) and `IsCheckout`. |
+| `Update/GitUpdateService.cs` | `git fetch/rev-parse/pull --ff-only`, stash before pulling, restore the stash if the pull fails; `RemoteUrl`/`IsCheckout` read `.git/config` without spawning git. Kept as the *development checkout* update path. |
 
 ---
 
@@ -137,23 +140,25 @@ reopens it on the tab the user was on) instead of re-binding every label.
 
 | File | Responsibility |
 | --- | --- |
-| `App.xaml(.cs)` | Startup: `EnsureDirs`, single-instance mutex, global exception handling, create `AppServices`, open `MainWindow`. The `--config` flag opens the settings window directly. `CheckApiKeyAsync` runs after the bar is up and opens *Settings → System* when the selected provider has no key or the provider rejects it — only a real rejection (`IsKeyRejected`) prompts, never a timeout, and providers that need no key are skipped. |
+| `App.xaml(.cs)` | Startup: `EnsureDirs`, single-instance mutex, global exception handling, create `AppServices`, open `MainWindow`. The `--config` flag opens the settings window directly. `CheckForUpdatesAsync` runs after the bar is up (off the UI thread, never blocking startup) and reports a newer release once per version through the bar; `CheckApiKeyAsync` runs after the bar is up and opens *Settings → System* when the selected provider has no key or the provider rejects it — only a real rejection (`IsKeyRejected`) prompts, never a timeout, and providers that need no key are skipped. |
 | `app.manifest` | PerMonitorV2 (critical: without it, physical coordinates and DIP drift apart on monitors scaled ≠ 100%). |
-| `Services/AppServices.cs` | The only place that creates `AppConfig`, `SettingsStore`, `LogService`, `OcrService`, `AgentService`, `ClipboardWatcher`, `GlobalHotkey`, `GitUpdateService` — and the only place that calls `L.Use(...)` before any window exists. |
+| `Services/AppServices.cs` | The only place that creates `AppConfig`, `SettingsStore`, `LogService`, `OcrService`, `AgentService`, `ClipboardWatcher`, `GlobalHotkey`, `GitUpdateService`, `GitHubUpdateService` — and the only place that calls `L.Use(...)` before any window exists. |
 | `Ui/Styles.xaml` | All control styles (button, textbox, combo, slider, tab, scrollbar...). No third-party libraries. |
 | `Ui/AppearanceSync.cs` | **The** appearance fan-out: `IThemedWindow.ApplyAppearance()` + one `SettingsStore.Changed` subscription, windows held through weak references. `App.xaml.cs` calls `Initialize` once; a window calls `Register(this)` and repaints on every appearance change. This is why the result bubble now follows a preset/opacity/font change live — and a new window only needs that one line instead of its own handler. |
 | `Ui/Theme.cs` | Applies the active palette to a window's `Resources` (`YuukaBg`, `YuukaPanel`, `YuukaPanelHover`, `YuukaBorder`, `YuukaText`, `YuukaSubtle`, `YuukaAccent`, `YuukaOnAccent`, `YuukaDanger`, `YuukaBarBg`, `YuukaBarText`, `YuukaFontFamily`, `YuukaFontSize`). Every window calls it on construction and again on `Settings.Changed`, which is what makes a preset switch repaint the bar, the bubble *and* the settings window at once. |
 | `Ui/Localization/TrExtension.cs` | `{ui:Tr key}` markup extension → `L.T(key)`. |
 | `Ui/MainWindow.xaml(.cs)` | The bar: dragging, physics, hooking, hotkey, clipboard, drop, open settings, quit. Owns the result window, so it also serves the Layout *Test* preview (`ShowResultPreview`, shown without focus) and `PromptForKey`, the entry point for the startup key check. |
 | `Ui/ResultWindow.xaml(.cs)` | Result bubble: placed by D-pad + spacing, flies out on the spring, drag to move. The text is a read-only selectable `TextBox`; a selection opens a floating icon-only copy button (and switches the chat scope to the selection), and the icon-only copy button under *close* copies everything. The borderless action bar at the bottom holds the registered action buttons (icon-only, ≤10, horizontally scrollable) plus the context label, chat box and send button, all on one row. `ShowText(text, barBounds, activate)` — `activate: false` is the preview, so the bubble cannot steal focus from the settings window. Implements `IThemedWindow`. |
+| `Ui/FullTextWindow.xaml(.cs)` | **Full Text Edit Mode** — the one expanded-text surface. `Show(services, titleKey, text, readOnly)` returns the edited text or `null` for *Back*; *Done* is hidden in read-only mode. Owned by the settings window it covers that window's bounds, otherwise it centres on the work area. Borderless chrome with the same 22 DIP shadow padding as the bubble. |
+| `Ui/Controls/PromptTools.xaml(.cs)` | The expand/reset pair attached to every prompt field: `Initialize(services, box, titleKey, defaultText)` — expand opens `FullTextWindow`, reset restores the shipped default (the button is disabled when the field has no shipped default). Raises `Committed` because assigning `TextBox.Text` programmatically never fires `LostFocus`, which is what the tab used to save on. |
 | `Ui/SnipOverlay.xaml(.cs)` | Screen region selection, returns a physical-pixel `ScreenRect`. |
-| `Ui/ConfigWindow.xaml(.cs)` | 8-tab settings shell (System, Appearance, Layout, Hooking, Prompt/Agent, History, Status, Console), repaints through `AppearanceSync`, navigates to a tab/provider, forwards `LayoutPanel.TestRequested` as `TestResultRequested`, refreshes History/Status when their tab is opened, and hosts `ShowKeyPrompt` for the startup check. |
+| `Ui/ConfigWindow.xaml(.cs)` | 8-tab settings shell (also the owner that `FullTextWindow` covers) (System, Appearance, Layout, Hooking, Prompt/Agent, History, Status, Console), repaints through `AppearanceSync`, navigates to a tab/provider, forwards `LayoutPanel.TestRequested` as `TestResultRequested`, refreshes History/Status when their tab is opened, and hosts `ShowKeyPrompt` for the startup check. |
 | `Ui/Controls/HotkeyBox.xaml(.cs)` | Captures a hotkey (key or middle mouse/X1/X2). |
 | `Ui/Controls/ModelPicker.xaml(.cs)` | The model field: a `TextBox` plus a non-focusable `Popup` list, because an editable `ComboBox` re-syncs its text from `SelectedItem` when the dropdown opens and wipes what was typed. Focus or a click shows the whole list, typing filters it (every word must match), arrows move, Enter/click/blur commits — and an unknown name stays a valid custom model. |
 | `Ui/Controls/ThemeCard.xaml(.cs)` | One preset card: a `RadioButton` (so `GroupName` gives exclusivity for free) drawing a miniature of the app — bar pill, accent dot, panel with two text lines. The preview colours are pushed in from the preset itself, not from the active theme, so the cards keep showing what each preset looks like while the window around them repaints. |
 | `Ui/Controls/TickMarks.cs` | Draws the tick marks and their numbers under a slider. WPF only renders ticks through a `TickBar`, and the app's slider template is hand-written, so this element does it directly: one line per step, the passed part in the accent colour, the numbers laid out left to right with colliding labels dropped, and the maximum always included. |
 | `Ui/PngEncoder.cs` | `CapturedImage` / `BitmapSource` → PNG bytes. |
-| `Ui/SelectionCopy.cs` | `Attach(TextBox)` → floating icon-only copy button next to the selection, positioned in the box's own coordinate space so it follows a scrolled line. Used by every History row. |
+| `Ui/SelectionCopy.cs` | `Attach(TextBox)` → floating icon-only copy button next to the selection, positioned in the box's own coordinate space so it follows a scrolled line. Used by the result bubble and every History row. `Track(box, popup)` owns the button's lifetime: it hides when the box loses keyboard focus (unless focus went into the popup itself), when the window is deactivated, and on any click outside the box. The popup stays `StaysOpen="True"` on purpose — a self-closing popup captures the mouse and eats the drag that creates the selection — so those conditions are explicit. |
 | `Ui/Controls/ActionIcons.cs` | The icon table: path data in a 16×16 box by **key** (`chat`, `translate`, `summarize`, `explain`, `check`, `list`, `code`, `search`, `star`, `bulb`, `wand`, `quill`) plus the chrome glyphs (`copy`, `send`, `expand`, `collapse`, `remove`, `plus`), and `Glyph(key, size, brush)`. Core stores the key, this turns it into pixels. |
 | `Ui/Controls/SliderSetup.cs` | `Apply(slider, key)` — pushes a `SliderSpec`'s range/step into a `Slider`. Every tab calls it, so the XAML numbers are only the designer preview. |
 | `Ui/Tabs/*.xaml(.cs)` | 8 tabs: System, Appearance, Layout, Hooking, Prompt/Agent, History, Status, Console. |
@@ -263,6 +268,15 @@ sequenceDiagram
 | 35 | Hook mode Outside/Inside, clamped targets, recalibrated defaults | `Interop/WindowTracker.cs`, Hooking tab (`ModeBox`), `Settings/SliderSpecs.cs` |
 | 36 | Slider ticks/tracks thicker, defaults on the grid, ranges from one table | `Ui/Controls/TickMarks.cs`, `Ui/Styles.xaml`, `Settings/SliderSpecs.cs`, `Ui/Controls/SliderSetup.cs` |
 | 37 | Opt-in API trace for CLI debugging, removed from production builds | `Logging/ApiTrace.cs`, `build.ps1` |
+| 38 | App icon from the master artwork (all sizes, exe + every window, rounded corners) | `tools/makeicon.py`, `Assets/app.ico`, `Assets/app-icon.png`, `YuukaOCR.App.csproj`, `Icon=` on every `Window` |
+| 39 | Background opacity ships at 90 %, an existing value wins | `Settings/ThemeSettings.cs`, `Settings/SliderSpecs.cs` |
+| 40 | Hooking keeps the bar's own horizontal position | `Interop/WindowTracker.cs` (`TargetFor(..., barLeft)`, `Find(..., keepHorizontalPosition)`), `Ui/MainWindow.cs` |
+| 41 | Full Text Edit Mode (one reusable window, Back/Done, read-only) | `Ui/FullTextWindow.xaml(.cs)`, `Ui/Controls/PromptTools.*`, History tab |
+| 42 | Window edge snapping: doubled ticks, old values still on the grid | `Settings/SliderSpecs.cs`, Hooking tab |
+| 43 | Expand/reset on every prompt field; English default prompts | `Ui/Controls/PromptTools.*`, Prompt/Agent tab, `Settings/AppConfig.cs`, `config/app_configs.json` |
+| 44 | Drag-and-drop action tabs, synced to the Action Bar | Prompt/Agent tab (`OnTabMouseDown`/`OnTabMouseMove`/`OnTabDrop`), `Ui/ResultWindow.cs` |
+| 45 | Action preset import/export (JSON, validated, all-or-nothing) | `Agent/AgentPreset.cs`, Prompt/Agent tab |
+| 46 | GitHub release check, download, install; git pull kept for checkouts | `Update/GitHubUpdateService.cs`, `Update/AppVersion.cs`, System tab, `App.xaml.cs` |
 
 ---
 
@@ -337,9 +351,26 @@ sequenceDiagram
     pipeline, so `AgentService` stays the only writer of the history (`user/log.json` → `chat_history`).
 25. **API payload tracing is opt-in** (`YUUKA_API_DEBUG=1` → `user/api-debug.log`) and `build.ps1`
     deletes the file before publishing: production builds must never ship prompt text.
-26. **The startup key check must not accuse a working key** — only a rejection from the provider
+26. **A pack URI names its assembly** — window icons use
+    `pack://application:,,,/YuukaOCR;component/Assets/app-icon.png`, not the `,,,/Assets/...` short
+    form. The short form resolves against the *entry* assembly, which is `YuukaXamlCheck` under the
+    layout harness, so every window that used it failed to load there while the real app was fine.
+27. **Full Text Edit Mode is one window, never a per-field dialog** — a field calls
+    `FullTextWindow.Show(...)` (or hosts `controls:PromptTools`), and only *Done* hands text back; the
+    caller saves it through its normal path. Read-only mode is the same window with `readOnly: true`.
+28. **A preset is content, ids are local** — `AgentPreset` never stores `AgentAction.Id`; the importer
+    mints fresh ids, so two imports of the same file cannot collide and a preset stays portable.
+29. **An update check can never break startup** — it runs off the UI thread with a timeout, folds every
+    failure into a message, and only the caller that announces a release touches
+    `UpdateNotifiedVersion`. `Install` never writes inside `user/`.
+30. **The startup key check must not accuse a working key** — only a rejection from the provider
     (`ModelListResult.IsKeyRejected`: 400/401/403) opens the prompt. Offline, timeout, 429 and 5xx
     leave the user alone; a nagging false positive is worse than a late error message.
+31. **The icon's rounded corners are the generator's job, not the artwork's** — `tools/makeicon.py`
+    masks every size with a 20 % corner radius and writes RGBA, and the DIB entries of the small sizes
+    repeat the transparency in their 1-bit AND mask. The master stays an untouched square tile, so
+    re-running the script is always enough to rebuild the look; never bake white corners into a new
+    master to fake it.
 
 ---
 
@@ -349,7 +380,8 @@ sequenceDiagram
 dotnet build YuukaOCR.slnx -c Release          # build the whole solution
 dotnet run --project src/YuukaOCR.App          # run the dev build
 dotnet run --project src/YuukaOCR.App -- --config   # open the settings window directly
-dotnet run --project tests/YuukaOCR.Tests      # 42 tests, no NuGet needed
+dotnet run --project tests/YuukaOCR.Tests      # 52 tests, no NuGet needed
+python tools/makeicon.py --check               # regenerate/verify the app icon
 YUUKA_API_DEBUG=1 dotnet run --project src/YuukaOCR.App   # writes user/api-debug.log (off by default)
 dotnet run --project tools/xamlcheck -c Release            # parses every XAML file + builds the bubble
 pwsh ./build.ps1                               # publish a self-contained folder
@@ -376,11 +408,22 @@ It also runs **layout probes** (`tools/xamlcheck/LayoutProbe.cs`), because "the 
   get at least the height their font and padding need;
 * every theme preset is checked for WCAG contrast on the accent buttons (normal, hover, pressed);
 * adding, renaming and removing an action must change the result bubble's action bar without pumping
-  the dispatcher by hand.
+  the dispatcher by hand;
+* the floating copy button must close on focus loss, on a click elsewhere in the bubble, and on an
+  empty selection, while a click *inside* the text keeps it (driven on an off-screen window so the
+  probe never steals focus);
+* the five *Window edge snapping* sliders are arranged at the width the tab gives them, rendered
+  through a `VisualBrush` and their marks counted in pixels: 9 / 9 / 9 / 9 / 13 marks for the new
+  50 / 25 / 50 steps, so the doubled grid is proven on screen and not just in `SliderSpecs`.
 
 The harness deliberately uses a plain `Application` and merges `Styles.xaml` itself. Creating
 `YuukaOCR.App.App` would post its `OnStartup` onto the dispatcher, and the first probe that pumps the
 queue would then take the single-instance mutex, show the main bar and start the API-key check.
+
+It also runs against **its own root**: `Program.UseScratchRoot()` sets `YUUKA_ROOT` (read first by
+`AppPaths.ResolveRoot`) to `%TEMP%\yuukaocr-xamlcheck`, copies `config/app_configs.json` in and wipes
+the scratch `user/` on every run. Before that, a probe run rewrote the real `user/settings.json` (the
+store saves on `Changed`) and seeded chat turns into the real `log.json`.
 
 ---
 
@@ -395,3 +438,86 @@ queue would then take the single-instance mutex, show the main bar and start the
 | `user/ui.png` | Custom bar image | Delete it to go back to the default |
 
 `user_config.json` (the old Python build's name) is still read through `AppPaths.LegacySettingsFile`.
+
+---
+
+## 10. Full Text Edit Mode
+
+One window, four call sites. `Ui/FullTextWindow.ShowFor(owner, services, title, text, readOnly)`
+returns `string?` — the edited text, or `null` when the user pressed *Back*.
+
+```
+┌ Back ──────── title ───────────────────────────────┐
+│                                                   │
+│  ┌ editable / read-only TextBox ───────────────┐  │
+│  │                                             │  │
+│  └─────────────────────────────────────────────┘  │
+│                                    [ Done ]       │
+└───────────────────────────────────────────────────┘
+```
+
+| Call site | Mode | Opened by |
+| --- | --- | --- |
+| OCR prompt | editable | `PromptTools.ExpandButton` |
+| Agent instruction | editable | `PromptTools.ExpandButton` |
+| Action instruction | editable | `PromptTools.ExpandButton` |
+| History entry | read-only | the row's expand icon (`LogTab`) |
+
+Rules it enforces: *Back* returns the text untouched (nothing is applied **or** discarded — the caller
+simply ignores a `null`); *Done* is the only writer, and the caller then saves through its usual path
+(`SettingsStore.Update` → debounced write → `Changed` → Action Bar rebuild); read-only hides *Done*,
+keeps the text selectable and copies through `SelectionCopy`. From *Settings* the window is owned by
+the settings window and covers its bounds; elsewhere it centres on the work area.
+
+## 11. Action preset format
+
+`AgentPreset.Export` writes, `AgentPreset.Import` reads:
+
+```json
+{
+  "format": "yuukaocr.actions",
+  "version": 1,
+  "exported_at": "2026-11-22T10:00:00Z",
+  "actions": [
+    { "name": "Translate", "icon": "translate", "instruction": "..." }
+  ]
+}
+```
+
+| Field | Rule |
+| --- | --- |
+| `format` | Must be exactly `yuukaocr.actions` → otherwise `preset.error.format` |
+| `version` | `1`; a higher number is refused (`preset.error.version`) rather than half-read |
+| `actions` | 1 … `AgentActions.Max` (10) → `preset.error.count`; order is the tab order and the Action Bar order |
+| entry shape | An element that is not an object → `preset.error.shape` |
+| empty / not JSON | `preset.error.empty` / `preset.error.json` (the parser message is passed as `{0}`) |
+| `name` | Trimmed, empty → the action is dropped |
+| `icon` | Passed through `AgentActions.NormalizeIcon` (unknown key → `chat`) |
+| `instruction` | Trimmed; may be empty (the action then sends only the global instruction) |
+
+Import replaces the whole table — the UI asks first (`agent.importConfirm`, "All {0} current action
+tabs will be replaced.") and a refused file
+leaves the current tabs untouched, because `Import` returns either a complete list or an error key.
+Default filename: `yuukaocr-actions-{yyyyMMdd-HHmm}.json`.
+
+## 12. Updates
+
+```
+App.OnStartup ──(thread pool)──> GitHubUpdateService.CheckAsync
+                                   ├─ git remote → owner/repo   (GitUpdateService.RemoteUrl)
+                                   ├─ GET /repos/{owner}/{repo}/releases/latest
+                                   ├─ AppVersion.TryParse(tag_name)  vs  running version
+                                   └─ pick the *.zip containing "win-x64"
+System tab ──> CheckAsync (manual) ──> DownloadAsync(progress) ──> Install
+```
+
+| Concern | Decision |
+| --- | --- |
+| Version source | The assembly version (`2.1.0`), compared with the release tag after a lenient parse |
+| "Up to date" | Equal **or** older, and no announcement is stored, so the next start checks again silently |
+| One notification per release | `UpdateNotifiedVersion` in `user/settings.json`, written by the only caller that announces |
+| No asset / bad tag / offline / rate limited | A status line in the System tab; nothing throws, nothing blocks startup |
+| Installing | The zip is unpacked to a temp folder, the package's `user/` is **deleted**, the install folder is overwritten, and a detached PowerShell script waits for this process to exit and restarts the exe |
+| User data | `user/settings.json`, `user/.env`, `user/log.json` (history), action presets — never inside the package, never overwritten |
+| Private repo | `GITHUB_TOKEN` in `user/.env` is used when present (`ApiKeyPool.ReadValue`), never logged |
+| Dev checkout | *Update with git* (`git pull --ff-only`, stash/restore) is offered in addition, and only there |

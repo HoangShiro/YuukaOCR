@@ -9,6 +9,7 @@ using YuukaOCR.Core.Input;
 using YuukaOCR.Core.Interop;
 using YuukaOCR.Core.Localization;
 using YuukaOCR.Core.Providers;
+using YuukaOCR.Core.Update;
 
 namespace YuukaOCR.App.Ui.Tabs;
 
@@ -48,6 +49,7 @@ public partial class SystemTab : UserControl
         };
 
         Load();
+        RefreshUpdateSection();
     }
 
     public void SelectProvider(string providerId)
@@ -426,9 +428,127 @@ public partial class SystemTab : UserControl
         });
     }
 
+    private void OnOpenUserFolder(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Directory.CreateDirectory(AppPaths.UserDir);
+            Process.Start(new ProcessStartInfo("explorer.exe", AppPaths.UserDir) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            KeyStatus.Text = ex.Message;
+        }
+    }
+
+    // ------------------------------------------------------------------ update
+
+    /// <summary>Latest answer from GitHub, kept so the section still shows it after a tab switch.</summary>
+    private UpdateCheck? _check;
+
+    private bool _updateBusy;
+
+    /// <summary>Redraws the whole Update section from <see cref="_check"/>.</summary>
+    private void RefreshUpdateSection()
+    {
+        UpdateCurrent.Text = L.F("sys.update.current", _services.Releases.CurrentVersion);
+        UpdateLatest.Text = L.F("sys.update.latest", _check?.LatestVersion ?? "—");
+
+        if (_check is not null) UpdateStatus.Text = Describe(_check);
+
+        // The install button exists only when there is something to install: a release without a
+        // package (or an older/equal version) must not offer a button that cannot work.
+        InstallUpdateButton.Visibility = _check?.CanInstall == true ? Visibility.Visible : Visibility.Collapsed;
+        InstallUpdateButton.IsEnabled = !_updateBusy;
+
+        // A dev checkout has .git and can pull commits even when no release exists; a published build
+        // has neither and simply never sees this button.
+        GitUpdateButton.Visibility = GitUpdateService.IsCheckout(AppPaths.Root)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    /// <summary>Turns a check/download result into one line of text in the user's language.</summary>
+    private static string Describe(UpdateCheck check) =>
+        check.MessageArg is null ? L.T(check.MessageKey) : L.F(check.MessageKey, check.MessageArg);
+
+    private static string Describe(UpdateDownload download) =>
+        download.MessageArg is null ? L.T(download.MessageKey) : L.F(download.MessageKey, download.MessageArg);
+
     private async void OnCheckUpdate(object sender, RoutedEventArgs e)
     {
+        if (_updateBusy) return;
+
+        _updateBusy = true;
         UpdateButton.IsEnabled = false;
+        UpdateStatus.Text = L.T("sys.update.checking");
+        RefreshUpdateSection();
+
+        try
+        {
+            _check = await _services.Releases.CheckAsync();
+            _services.Log.ConsoleLog($"[update] {Describe(_check)}");
+        }
+        finally
+        {
+            _updateBusy = false;
+            UpdateButton.IsEnabled = true;
+            RefreshUpdateSection();
+        }
+    }
+
+    private async void OnInstallUpdate(object sender, RoutedEventArgs e)
+    {
+        if (_updateBusy || _check is not { Asset: { } asset } check) return;
+
+        var answer = MessageBox.Show(L.F("sys.update.confirm", check.LatestVersion), "YuukaOCR",
+            MessageBoxButton.YesNo, MessageBoxImage.Question);
+        if (answer != MessageBoxResult.Yes) return;
+
+        _updateBusy = true;
+        UpdateProgress.Visibility = Visibility.Visible;
+        UpdateProgress.Value = 0;
+        UpdateStatus.Text = L.T(GitHubUpdateService.KeyDownloading);
+        RefreshUpdateSection();
+
+        try
+        {
+            var target = GitHubUpdateService.PackagePath(check.LatestVersion ?? "latest");
+            var progress = new Progress<double>(value => UpdateProgress.Value = value);
+            var download = await _services.Releases.DownloadAsync(asset, target, progress);
+
+            UpdateStatus.Text = Describe(download);
+            if (!download.Success || download.Path is null) return;
+
+            var install = _services.Releases.Install(download.Path, AppContext.BaseDirectory,
+                "YuukaOCR.exe", Environment.ProcessId);
+
+            UpdateStatus.Text = install.Success
+                ? L.T(GitHubUpdateService.KeyInstallStarted)
+                : L.F(GitHubUpdateService.KeyInstallFailed, install.MessageArg);
+
+            if (install.Success)
+            {
+                // The script waits for this process to exit and then relaunches the new build.
+                // user/ is untouched by design, so settings, keys, presets and history survive.
+                Application.Current.Shutdown();
+            }
+        }
+        finally
+        {
+            _updateBusy = false;
+            UpdateProgress.Visibility = Visibility.Collapsed;
+            RefreshUpdateSection();
+        }
+    }
+
+    /// <summary>The pre-existing mechanism: pull commits in a working copy. Only shown in a checkout.</summary>
+    private async void OnGitUpdate(object sender, RoutedEventArgs e)
+    {
+        if (_updateBusy) return;
+
+        _updateBusy = true;
+        GitUpdateButton.IsEnabled = false;
         UpdateStatus.Text = L.T("sys.update.checking");
 
         try
@@ -449,20 +569,9 @@ public partial class SystemTab : UserControl
         }
         finally
         {
-            UpdateButton.IsEnabled = true;
-        }
-    }
-
-    private void OnOpenUserFolder(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            Directory.CreateDirectory(AppPaths.UserDir);
-            Process.Start(new ProcessStartInfo("explorer.exe", AppPaths.UserDir) { UseShellExecute = true });
-        }
-        catch (Exception ex)
-        {
-            KeyStatus.Text = ex.Message;
+            _updateBusy = false;
+            GitUpdateButton.IsEnabled = true;
+            RefreshUpdateSection();
         }
     }
 }

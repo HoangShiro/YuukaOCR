@@ -5,6 +5,7 @@ using YuukaOCR.Core.Interop;
 using YuukaOCR.Core.Localization;
 using YuukaOCR.Core.Logging;
 using YuukaOCR.Core.Ocr;
+using YuukaOCR.Core.Providers;
 using YuukaOCR.Core.Settings;
 using YuukaOCR.Core.Update;
 
@@ -28,6 +29,9 @@ public sealed class AppServices : IDisposable
     public GlobalHotkey Hotkey { get; }
     public GitUpdateService Updater { get; }
 
+    /// <summary>GitHub Releases: the update source for a published build (see <see cref="Updater"/> for checkouts).</summary>
+    public GitHubUpdateService Releases { get; }
+
     public AppServices()
     {
         Config = AppConfig.Load(AppPaths.AppConfigFile);
@@ -47,12 +51,61 @@ public sealed class AppServices : IDisposable
         Hotkey = new GlobalHotkey(Log.ConsoleLog);
         Updater = new GitUpdateService(Log);
 
+        // Owner/repo come from the checkout's origin when there is one, so a fork updates itself
+        // instead of the upstream project. The fallback is the repository this build ships from.
+        var remote = GitUpdateService.RemoteUrl(AppPaths.Root);
+        if (!GitHubUpdateService.TryParseRepository(remote, out var owner, out var repository))
+        {
+            owner = GitHubUpdateService.DefaultOwner;
+            repository = GitHubUpdateService.DefaultRepository;
+        }
+
+        Releases = new GitHubUpdateService(Log, Version, GitHubToken(), owner, repository);
+
         Log.ConsoleLog(L.F("app.startup", typeof(AppServices).Assembly.GetName().Version,
             Settings.Settings.ApiProvider));
     }
 
+    /// <summary>
+    /// The running application version as text ("2.1.0"). One source for the title bar, the settings
+    /// window and the update comparison, so they can never disagree.
+    /// </summary>
+    public static string Version =>
+        typeof(AppServices).Assembly.GetName().Version is { } version
+            ? AppVersion.From(version).ToString()
+            : "0.0.0";
+
+    /// <summary>
+    /// Optional GitHub token. The repository is private, so a token is the only way to see its
+    /// releases; the environment wins over user/.env, and neither is ever logged.
+    /// </summary>
+    private static string GitHubToken()
+    {
+        var fromEnvironment = Environment.GetEnvironmentVariable(GitHubUpdateService.TokenKey);
+        if (!string.IsNullOrWhiteSpace(fromEnvironment)) return fromEnvironment.Trim();
+        return ApiKeyPool.ReadValue(AppPaths.EnvFile, GitHubUpdateService.TokenKey);
+    }
+
+    /// <summary>
+    /// The startup check: asks GitHub once per launch, logs the answer, and hands the result back.
+    /// Whether to *tell* the user is the caller's decision, because only the startup path announces and
+    /// only once per release.
+    /// </summary>
+    public async Task<UpdateCheck?> CheckForUpdatesAsync()
+    {
+        if (!Settings.Settings.AutoUpdateEnabled) return null;
+
+        var check = await Releases.CheckAsync();
+        Log.ConsoleLog("[update] " + (check.MessageArg is null
+            ? L.T(check.MessageKey)
+            : L.F(check.MessageKey, check.MessageArg)));
+
+        return check;
+    }
+
     public void Dispose()
     {
+        Releases.Dispose();
         Hotkey.Dispose();
         Clipboard.Dispose();
         Agent.Dispose();

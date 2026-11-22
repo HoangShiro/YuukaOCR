@@ -20,8 +20,13 @@ public sealed class ThemeSettings
     /// <summary>Opacity of the floating bar / pill, in percent.</summary>
     [JsonPropertyName("frame_opacity")] public int FrameOpacity { get; set; } = 100;
 
-    /// <summary>Opacity of the result bubble and the settings window background, in percent.</summary>
-    [JsonPropertyName("background_opacity")] public int BackgroundOpacity { get; set; } = 96;
+    /// <summary>
+    /// Opacity of the result bubble and the settings window background, in percent.
+    ///
+    /// 90 is the shipped default. The value is only ever taken from the file: a settings.json that
+    /// stores its own number keeps it, so an upgrade never resets a user's chosen transparency.
+    /// </summary>
+    [JsonPropertyName("background_opacity")] public int BackgroundOpacity { get; set; } = 90;
 
     [JsonPropertyName("sub_win_font_family")] public string FontFamily { get; set; } = "Segoe UI";
     [JsonPropertyName("sub_win_font_size")] public double FontSize { get; set; } = 12;

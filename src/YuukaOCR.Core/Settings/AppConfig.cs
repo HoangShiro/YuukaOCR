@@ -7,8 +7,13 @@ namespace YuukaOCR.Core.Settings;
 /// <summary>Machine-level defaults shipped in config/app_configs.json (not user-editable from the UI).</summary>
 public sealed class AppConfig
 {
+    /// <summary>
+    /// The shipped OCR prompt, in English like every other default. It asks for a Vietnamese
+    /// translation because that is what the app is used for — the *prompt* is English, not the answer.
+    /// </summary>
     public const string DefaultPromptText =
-        "LUÔN LUÔN dịch text sang tiếng việt với tone phù hợp với ngữ cảnh/giọng điệu/ngôn ngữ trẻ trung/anime. Chỉ trả về duy nhất text được dịch.";
+        "ALWAYS translate the text into Vietnamese, keeping a tone that fits the context, the speaker's " +
+        "tone and a youthful, anime-style register. Return only the translated text.";
 
     [JsonPropertyName("UiImage")] public string UiImage { get; set; } = "ui.png";
     [JsonPropertyName("MaxFileSizeMb")] public int MaxFileSizeMb { get; set; } = 100;

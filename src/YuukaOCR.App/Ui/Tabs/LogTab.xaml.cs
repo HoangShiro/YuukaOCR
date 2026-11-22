@@ -108,17 +108,10 @@ public partial class LogTab : UserControl
             Margin = new Thickness(0, 2, 0, 0)
         };
 
-        Button? expandButton = null;
-        expandButton = IconButton("expand", L.T("log.expand"), () =>
-        {
-            entry.Expanded = !entry.Expanded;
-            text.MaxHeight = entry.Expanded ? double.PositiveInfinity : CollapsedHeight;
-            if (expandButton is not null)
-            {
-                RefreshIcon(expandButton, entry.Expanded ? "collapse" : "expand",
-                    entry.Expanded ? L.T("log.collapse") : L.T("log.expand"));
-            }
-        });
+        // Expand no longer grows the row in place: it opens the Full Text Edit Mode read-only, where the
+        // whole entry is visible, selectable and copyable. The stored entry is never touched.
+        var expandButton = IconButton("expand", L.T("log.expand"), () =>
+            FullTextWindow.ShowFor(Window.GetWindow(this), _services, entry.Stamp, entry.Full, readOnly: true));
 
         actions.Children.Add(IconButton("copy", L.T("result.copy"), () =>
         {
@@ -157,13 +150,6 @@ public partial class LogTab : UserControl
 
         button.Click += (_, _) => onClick();
         return button;
-    }
-
-    private static void RefreshIcon(Button button, string icon, string tooltip)
-    {
-        button.ToolTip = tooltip;
-        var brush = button.TryFindResource("YuukaSubtle") as Brush ?? Brushes.Gray;
-        button.Content = ActionIcons.Glyph(icon, 12, brush);
     }
 
     // ---------------------------------------------------------------- actions
@@ -219,13 +205,12 @@ public partial class LogTab : UserControl
         _ => element.ToString()
     };
 
-    /// <summary>One row's data, with the transient "expanded" flag the expand button flips.</summary>
+    /// <summary>One row's data. The full text is what the row shows and what the editor opens.</summary>
     private sealed class Entry
     {
         public string Stamp { get; private init; } = "";
         public string Full { get; private init; } = "";
         public bool IsUser { get; private init; }
-        public bool Expanded { get; set; }
 
         public static Entry From(string stamp, string full, bool isUser = false) =>
             new() { Stamp = stamp, Full = full, IsUser = isUser };

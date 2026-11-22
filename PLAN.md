@@ -348,3 +348,76 @@ so the first probe that pumped the queue took the single-instance mutex, created
 and rebound `AppearanceSync` to the app's own settings store — which made the action-bar probe fail
 for a reason that does not exist in the app. The harness now builds a plain `Application` and merges
 `Styles.xaml` itself.
+
+---
+
+## 8. Round 3 — icon, transparency, hooking, full text, presets, updates
+
+Nine requests in one batch. Each one is marked done only after the check in the last column actually
+ran (CLI, logs — no GUI interaction, as required).
+
+| # | Requirement | Implementation | Verified by |
+| --- | --- | --- | --- |
+| 1 | App icon from `Assets/18 thg 8 2026.png`, all formats, exe + title bars, master preserved, corners rounded | `tools/makeicon.py` (stdlib PNG/ICO + 20 % rounded mask), `Assets/app.ico` (10 sizes), `Assets/app-icon.png` (RGBA), `<ApplicationIcon>`, `Icon=` on all 5 windows | `makeicon.py --check` passes (all 10 sizes, corners transparent, 280 soft edge pixels); every ICO entry has `alpha=0` at the corner and `255` at the centre, AND mask bit set only in the corners; `ExtractAssociatedIcon` on the published exe is `Format32bppArgb` with corner alpha `0, 0, 0, 0`; `xamlcheck` loads every window, so the pack URI resolves |
+| 2 | Default background opacity 90 %, never overwrite a stored value | `ThemeSettings.BackgroundOpacity = 90`, `SliderSpecs` default 90 | test `ThemeSettings: the shipped background opacity is 90 % and a saved value wins`; `user/settings.json` still holds the user's 80 |
+| 3 | Hooking keeps the bar's position | `WindowTracker.TargetFor(..., barLeft)`, `Find(..., keepHorizontalPosition)`; `MainWindow` passes `bar.Left` | test `WindowTracker: hooking keeps the bar where the user put it` |
+| 4 | Full Text Edit Mode, reusable, Back/Done, covers Settings, read-only mode | `Ui/FullTextWindow.xaml(.cs)` + `Ui/Controls/PromptTools.xaml(.cs)`; `LogTab` opens it read-only | `xamlcheck` constructs every tab and the bubble with the new control; Back/Done semantics are code-level (`ShowFor` returns `null` on Back, `readOnly` never returns text) |
+| 5 | Double the Window Edge Snapping tick intervals, stay compatible | `SliderSpecs`: 50 / 25 / 50 steps | tests `window edge snapping doubled its tick count` and `values saved by the old tick grid stay on the new one` (every old value is still a tick) |
+| 6 | Expand + Reset on every prompt field; defaults in English | `PromptTools` on OCR prompt / agent instruction / action instruction; `AppConfig.DefaultPromptText` + `config/app_configs.json` translated | 10 localization tables hold the new keys (test); reset is disabled when a field has no shipped default |
+| 7 | Drag-reorder action tabs, Action Bar follows, order persisted | `OnTabMouseDown/Move/DragOver/Drop` in `PromptAgentTab`, `settings.Update(s => s.Actions)` | `xamlcheck` probe `action bar sync: 3 -> 4 -> Renamed action -> 3 buttons` |
+| 8 | Preset import/export, validated, replaces all tabs with confirmation | `Core/Agent/AgentPreset.cs`, two icon buttons, `agent.importConfirm` warning | tests `export then import restores order, names, icons and instructions` and `every broken file is refused with its own reason` (6 cases) |
+| 9 | History expand opens read-only Full Text Edit Mode | `LogTab` expand icon → `FullTextWindow.ShowFor(..., readOnly: true)` | `xamlcheck` builds the History rows (`outputs=5`, `prompts=0`, `chat=0`) |
+| 10 | GitHub update check on start, compare versions, Update section, graceful failures | `Update/AppVersion.cs`, `Update/GitHubUpdateService.cs`, System tab Update section, `App.xaml.cs` background check | tests for tag parsing, release interpretation, remote parsing and the installer script; live run of the published exe logged `[update] The repository is private: add GITHUB_TOKEN to user/.env to read its releases.` and kept starting normally |
+| 11 | No dev/debug API logs in a production build, no secrets in logs | `ApiTrace` is opt-in (`YUUKA_API_DEBUG=1`), `build.ps1` deletes trace files before publishing | publish tree contains no `api-debug.log`; the token is read through `ApiKeyPool.ReadValue` and never logged |
+| 12 | Docs updated | `README.md` (icon, full text, presets, updates, 90 %), `PROJECT_STRUCTURE.md` (new sections 10–12, file tables, conventions 26–29) | this file |
+
+### Verification (CLI only)
+
+```
+dotnet build YuukaOCR.slnx -c Release                     Build succeeded, 0 warnings, 0 errors
+dotnet run --project tests/YuukaOCR.Tests -c Release       52/52 passed
+dotnet run --project tools/xamlcheck -c Release            12 windows/tabs + 13 probes, all passed
+dotnet publish ... -r win-x64 -o publish                   YuukaOCR.exe 341,504 B, version 2.1.0.0
+```
+
+Probes worth naming:
+
+```
+OK  window edge snapping: ProximityTop 9, ProximityBottom 9, OffsetTop 9, OffsetBottom 9, Unhook 13 marks drawn at the tab's own width
+OK  action bar sync: 3 -> 4 -> Renamed action -> 3 buttons
+OK  ChatBox at 100/125/150 %: 30.4 / 34.4 / 37.6 DIP for a 23.6 / 27.5 / 31.4 DIP line
+```
+
+The mark count is rendered through a `VisualBrush`: `RenderTargetBitmap.Render(element)` includes the
+element's own layout offset, so rendering the tick row directly painted it outside a bitmap sized to
+the row and reported 0 marks.
+
+### 8.1 Follow-up — the floating copy button outlived its selection
+
+Reported: the button stayed on screen after the selection lost focus or after a click somewhere else.
+Cause: the popup is `StaysOpen="True"` (a self-closing popup captures the mouse and eats the drag that
+creates a selection) and nothing else ever closed it — only an empty selection or a successful copy
+did. Fix: `SelectionCopy.Track(box, popup)`, one lifetime rule set shared by the bubble and every
+History row, hiding on keyboard-focus loss (skipped when focus moved into the popup, which is what
+clicking the button does), on window deactivation, and on any click outside the text box. Probe:
+
+```
+OK  selection copy button closes on click-away, click-inside-kept, cleared, focus-lost
+```
+
+### One defect the harness was hiding
+
+Running `tools/xamlcheck` rewrote the real `user/settings.json` (the store saves on `Changed`, and the
+harness resolved its root to the repository) and seeded chat turns into the real `log.json`. That is
+exactly the "never modify saved configurations" rule, so `AppPaths.ResolveRoot` now honours
+`YUUKA_ROOT`, and the harness points it at `%TEMP%\yuukaocr-xamlcheck` with a copy of the shipped
+`config/`, wiping the scratch `user/` each run. `user/settings.json` keeps the same md5 across a probe
+run now.
+
+### One defect found by the harness
+
+`Icon="pack://application:,,,/Assets/app-icon.png"` is the short form of a pack URI: it resolves
+against the **entry** assembly. Under `tools/xamlcheck` the entry assembly is `YuukaXamlCheck`, which
+carries no `Assets/`, so `SnipOverlay` and `ResultWindow` failed to load with
+`Cannot locate resource 'assets/app-icon.png'` while the real app was fine. Every window now uses the
+assembly-qualified form `pack://application:,,,/YuukaOCR;component/Assets/app-icon.png`.

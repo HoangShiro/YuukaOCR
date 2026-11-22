@@ -577,6 +577,11 @@
     <Geometry x:Key="IconCollapse">M7,7 L2,2 M2,6 V2 H6 M9,9 L14,14 M14,10 V14 H10</Geometry>
     <Geometry x:Key="IconRemove">M3,4.5 H13 M6.5,4.5 V2.8 H9.5 V4.5 M4.5,4.5 L5.2,13.5 H10.8 L11.5,4.5</Geometry>
     <Geometry x:Key="IconPlus">M8,3 V13 M3,8 H13</Geometry>
+    <!-- Reset: the "restore default" arrow used by the prompt tool rows. -->
+    <Geometry x:Key="IconReset">M2.34,10 A6,6 0 1 0 3.76,3.76 L0.67,6.67 M0.67,2.67 V6.67 H4.67</Geometry>
+    <!-- Preset import/export: an arrow into / out of a tray. -->
+    <Geometry x:Key="IconImport">M8,2 V10 M4.6,6.6 L8,10 L11.4,6.6 M2.5,13.2 H13.5</Geometry>
+    <Geometry x:Key="IconExport">M8,10 V2 M4.6,5.4 L8,2 L11.4,5.4 M2.5,13.2 H13.5</Geometry>
 
     <!--
         Accent-filled icon button: the result window's send button, the floating copy buttons and the

@@ -357,7 +357,10 @@ public partial class MainWindow : Window, IThemedWindow
             bounds.Value.Left, bounds.Value.Top, bounds.Value.Width, bounds.Value.Height,
             settings.HookProximityTop, settings.HookProximityBottom,
             settings.HookOffsetTop, settings.HookOffsetBottom,
-            _handle, WindowTracker.ParseMode(settings.HookMode));
+            _handle, WindowTracker.ParseMode(settings.HookMode),
+            // Attaching only moves the bar vertically: its horizontal position is the user's, and
+            // hooking must not slide it to the middle of the target's edge.
+            keepHorizontalPosition: true);
 
         if (candidate is null) return;
 
@@ -368,14 +371,16 @@ public partial class MainWindow : Window, IThemedWindow
 
     /// <summary>
     /// Where the bar belongs for a hooked window. The math (and the "stay on screen even when the target
-    /// is fullscreen" rule) lives in Core so it can be tested without a window.
+    /// is fullscreen" rule) lives in Core so it can be tested without a window. The bar's own left edge
+    /// is passed in, so the hook only ever moves the bar along the axis it owns.
     /// </summary>
     private static (double X, double Y) TargetFor(ScreenRect window, ScreenRect bar, HookEdge edge,
         AppSettings settings) =>
         WindowTracker.TargetFor(
             window, bar.Width, bar.Height, edge,
             WindowTracker.ParseMode(settings.HookMode),
-            settings.HookOffsetTop, settings.HookOffsetBottom);
+            settings.HookOffsetTop, settings.HookOffsetBottom,
+            bar.Left);
 
     private void Unhook()
     {
@@ -593,6 +598,12 @@ public partial class MainWindow : Window, IThemedWindow
     }
 
     // --------------------------------------------------------------- UI state
+
+    /// <summary>
+    /// Puts a message in the bar for a while. Public because the startup update check reports through
+    /// it — the bar is the app's only always-visible surface.
+    /// </summary>
+    public void ShowStatus(string message, int durationMs) => SetStatus(message, durationMs);
 
     private void SetStatus(string message, int durationMs)
     {

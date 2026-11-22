@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ui="clr-namespace:YuukaOCR.App.Ui.Localization"
         Title="YuukaOCR" Width="200" Height="50"
+        Icon="pack://application:,,,/YuukaOCR;component/Assets/app-icon.png"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         ResizeMode="NoResize" ShowInTaskbar="False" Topmost="True"
         SnapsToDevicePixels="True" UseLayoutRounding="True"

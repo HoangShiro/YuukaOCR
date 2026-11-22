@@ -6,7 +6,10 @@
     <RootNamespace>YuukaOCR.App</RootNamespace>
     <AssemblyName>YuukaOCR</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>2.0.0</Version>
+    <!-- The exe icon (Explorer, taskbar, Alt+Tab) comes from this .ico; tools/makeicon.py builds it
+         from Assets/18 thg 8 2026.png, which stays the untouched master copy. -->
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+    <Version>2.1.0</Version>
     <Product>YuukaOCR</Product>
     <Company>Yuuka</Company>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
@@ -16,5 +19,9 @@
   </ItemGroup>
   <ItemGroup>
     <None Update="Assets\ui.png" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Embedded so every window can use pack://application:,,,/Assets/app-icon.png as its title-bar
+         and taskbar icon. The master artwork is deliberately not an item: it never ships. -->
+    <Resource Include="Assets\app.ico" />
+    <Resource Include="Assets\app-icon.png" />
   </ItemGroup>
 </Project>

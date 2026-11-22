@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using YuukaOCR.App.Ui;
 using YuukaOCR.App.Ui.Tabs;
@@ -11,9 +12,48 @@ internal static class Program
     private static int Count(FrameworkElement root, string name) =>
         root.FindName(name) is System.Windows.Controls.Panel panel ? panel.Children.Count : -1;
 
+    /// <summary>
+    /// Runs the harness against %TEMP%\yuukaocr-xamlcheck instead of the repository: the probes save
+    /// settings (action edits) and chat turns, and a test run must never rewrite the user's real files.
+    /// The scratch user/ is wiped on every run so the probes always start from the seeded defaults.
+    /// </summary>
+    private static void UseScratchRoot()
+    {
+        var scratch = Path.Combine(Path.GetTempPath(), "yuukaocr-xamlcheck");
+
+        var userDir = Path.Combine(scratch, "user");
+        if (Directory.Exists(userDir)) Directory.Delete(userDir, true);
+
+        var configDir = Path.Combine(scratch, "config");
+        Directory.CreateDirectory(configDir);
+
+        if (FindConfigFile() is { } source)
+            File.Copy(source, Path.Combine(configDir, "app_configs.json"), overwrite: true);
+
+        Environment.SetEnvironmentVariable("YUUKA_ROOT", scratch);
+    }
+
+    /// <summary>The same walk-up rule as <c>AppPaths</c>: the folder whose config/ holds the shipped file.</summary>
+    private static string? FindConfigFile()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        for (var i = 0; i < 8 && dir is not null; i++, dir = dir.Parent)
+        {
+            var candidate = Path.Combine(dir.FullName, "config", "app_configs.json");
+            if (File.Exists(candidate)) return candidate;
+        }
+
+        return null;
+    }
+
     [STAThread]
     private static int Main()
     {
+        // Nothing below may touch the user's own user/ folder: the probes save settings and write chat
+        // turns. Point AppPaths at a throwaway root, with a copy of the real config so the shipped
+        // defaults are still what gets exercised.
+        UseScratchRoot();
+
         // A plain Application, not YuukaOCR.App.App: the real App posts OnStartup on its dispatcher, which
         // would create the single-instance mutex, show the main bar and start the API-key check the first
         // time a probe pumps the queue. Merging Styles.xaml by hand gives the same resources, headless.
@@ -59,7 +99,11 @@ internal static class Program
             Check("ResultWindow", () => new ResultWindow(services));
 
             // History rows are built in code, so building them is the only way to catch a missing
-            // resource or a null settings value there.
+            // resource or a null settings value there. The scratch log starts empty, so seed it.
+            services.Log.AddRecentOutput("Sakura is the default theme.");
+            services.Log.AddRecentPrompt("Read the text in this image.");
+            services.Log.AddRecentOutput(new { extracted_text = "A long result that fills the row." });
+
             var logTab = new LogTab();
             logTab.Initialize(services);
             logTab.Refresh();

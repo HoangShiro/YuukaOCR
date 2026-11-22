@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using YuukaOCR.App.Services;
@@ -29,6 +30,8 @@ internal static class LayoutProbe
         _failures = 0;
 
         SliderGeometry();
+        SnappingTicks();
+        SelectionPopupLifetime(services);
         InputClipping(services);
         TickInk();
         ThemeContrast();
@@ -106,7 +109,220 @@ internal static class LayoutProbe
         }
     }
 
+    /// <summary>
+    /// The *Window edge snapping* sliders doubled their tick count (steps 50 / 25 / 50 instead of
+    /// 100 / 50 / 100). Counting the marks that are actually drawn — after `SliderSetup.Apply`, at the
+    /// width the tab gives them — is the only way to know the new grid reached the screen and not just
+    /// the spec table.
+    /// </summary>
+    private static void SnappingTicks()
+    {
+        var snapping = new (string Name, string Key)[]
+        {
+            ("ProximityTopSlider", SliderSpecs.HookProximityTop),
+            ("ProximityBottomSlider", SliderSpecs.HookProximityBottom),
+            ("OffsetTopSlider", SliderSpecs.HookOffsetTop),
+            ("OffsetBottomSlider", SliderSpecs.HookOffsetBottom),
+            ("UnhookSlider", SliderSpecs.UnhookDistance)
+        };
+
+        var tab = new HookingTab();
+        var host = Host(tab);
+
+        try
+        {
+            var drawn = new List<string>();
+
+            foreach (var (name, key) in snapping)
+            {
+                if (tab.FindName(name) is not Slider slider)
+                {
+                    Fail($"snapping ticks: {name} is missing from the Hooking tab");
+                    return;
+                }
+
+                SliderSetup.Apply(slider, key);
+                slider.UpdateLayout();
+
+                if (slider.Template.FindName("PART_Ticks", slider) is not TickMarks ticks)
+                {
+                    Fail($"snapping ticks: {name} has no tick row");
+                    return;
+                }
+
+                var spec = SliderSpecs.Get(key);
+                var expected = (int)Math.Round((spec.Max - spec.Min) / spec.Step) + 1;
+
+                var width = (int)Math.Ceiling(ticks.ActualWidth);
+                var height = (int)Math.Ceiling(ticks.ActualHeight);
+                if (width <= 0 || height <= 0)
+                {
+                    Fail($"snapping ticks: {name} tick row is {width}x{height}");
+                    return;
+                }
+
+                // Render through a VisualBrush: RenderTargetBitmap.Render(ticks) would include the
+                // element's own layout offset and paint it outside a bitmap sized to the element.
+                var visual = new DrawingVisual();
+                using (var dc = visual.RenderOpen())
+                    dc.DrawRectangle(new VisualBrush(ticks), null, new Rect(0, 0, width, height));
+
+                var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+                bitmap.Render(visual);
+
+                var marks = Sample(bitmap, 0);
+                if (marks.Count != expected)
+                {
+                    Fail($"snapping ticks: {name} draws {marks.Count} marks over {width} DIP, expected {expected}");
+                    return;
+                }
+
+                drawn.Add($"{name.Replace("Slider", "")} {marks.Count}");
+            }
+
+            Pass($"window edge snapping: {string.Join(", ", drawn)} marks drawn at the tab's own width");
+        }
+        catch (Exception ex)
+        {
+            Fail($"snapping ticks: {ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            host.Close();
+        }
+    }
+
     // -------------------------------------------------------------- inputs
+    /// <summary>
+    /// The floating copy button must not outlive the selection it belongs to. It used to stay on screen
+    /// after the bubble lost focus or after a click somewhere else in the window, because the popup is
+    /// sticky (`StaysOpen=True` — a self-closing popup eats the drag that creates a selection).
+    /// </summary>
+    private static void SelectionPopupLifetime(AppServices services)
+    {
+        var result = new ResultWindow(services);
+
+        try
+        {
+            if (result.FindName("ResultBox") is not TextBox box || result.FindName("SelectionPopup") is not Popup popup)
+            {
+                Fail("selection popup: ResultBox/SelectionPopup not found");
+                return;
+            }
+
+            result.ShowText("Yuuka reads the text inside the selection.", null, activate: false);
+
+            var checks = new List<string>();
+
+            // 1. A selection opens it (the baseline the other cases start from).
+            box.Select(0, 5);
+            if (!popup.IsOpen)
+            {
+                Fail("selection popup: a selection did not open the copy button");
+                return;
+            }
+
+            // 2. A click elsewhere in the bubble (the header, the action bar, the chat box).
+            var elsewhere = result.FindName("HeaderRow") as DependencyObject ?? result;
+            Click(result, elsewhere);
+            checks.Add($"click-away:{popup.IsOpen == false}");
+
+            // 3. A click inside the text is not "away": the selection change decides, not this handler.
+            box.Select(0, 5);
+            Click(result, box);
+            checks.Add($"click-inside-kept:{popup.IsOpen}");
+
+            // 4. An empty selection always closes it.
+            box.Select(0, 0);
+            checks.Add($"cleared:{popup.IsOpen == false}");
+
+            // 5. Losing keyboard focus closes it, and so does hiding the window. Driven on a real
+            //    (off-screen, never activated) window, because focus needs a presentation source.
+            checks.AddRange(OffscreenPopupChecks());
+
+            var failures = checks.Where(c => c.EndsWith(":False", StringComparison.Ordinal)).ToList();
+            if (failures.Count > 0)
+                Fail($"selection popup lifetime: {string.Join(", ", failures)}");
+            else
+                Pass($"selection copy button closes on {string.Join(", ", checks.Select(c => c.Split(':')[0]))}");
+        }
+        catch (Exception ex)
+        {
+            Fail($"selection popup lifetime: {ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            result.Close();
+        }
+    }
+
+    /// <summary>
+    /// Focus is the reported case: selecting text and then clicking into the chat box (or another app)
+    /// leaves the selection behind, and the button used to stay floating over it. Off-screen and
+    /// never activated, so the probe cannot steal focus from whatever the user is doing.
+    /// </summary>
+    private static List<string> OffscreenPopupChecks()
+    {
+        var checks = new List<string>();
+
+        var box = new TextBox { Text = "Yuuka reads the text inside the selection.", Width = 240 };
+        var host = new Window
+        {
+            Width = 260,
+            Height = 60,
+            Left = -4000,
+            Top = -4000,
+            ShowActivated = false,
+            ShowInTaskbar = false,
+            WindowStyle = WindowStyle.None,
+            Content = box
+        };
+
+        var popup = new Popup
+        {
+            PlacementTarget = box,
+            Placement = PlacementMode.Relative,
+            AllowsTransparency = true,
+            StaysOpen = true,
+            Child = new Button { Width = 26, Height = 26, Content = "C" }
+        };
+
+        host.Show();
+        var tracker = SelectionCopy.Track(box, popup);
+
+        try
+        {
+            Keyboard.Focus(box);
+            box.Select(0, 5);
+
+            // `Track` owns the lifetime rules only; opening is the selection handler's job (covered by
+            // the bubble probe above), so open the popup the way it would be open.
+            popup.IsOpen = true;
+            Keyboard.ClearFocus();
+            checks.Add($"focus-lost:{!popup.IsOpen}");
+
+            Keyboard.Focus(box);
+            popup.IsOpen = true;
+            host.Hide();
+            checks.Add($"window-hidden:{!popup.IsOpen}");
+
+            return checks;
+        }
+        finally
+        {
+            tracker.Dispose();
+            popup.IsOpen = false;
+            host.Close();
+        }
+    }
+
+    /// <summary>Raises a left-button press the way the window would see it, with that element as the source.</summary>
+    private static void Click(Window window, DependencyObject source) =>
+        window.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left)
+        {
+            RoutedEvent = UIElement.PreviewMouseLeftButtonDownEvent,
+            Source = source
+        });
 
     /// <summary>
     /// An input that got less height than it asked for clips its text — that is exactly what a hard-coded

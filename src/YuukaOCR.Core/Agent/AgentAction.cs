@@ -51,6 +51,16 @@ public static class AgentActions
     public static string NewId() => "act-" + Guid.NewGuid().ToString("n")[..8];
 
     /// <summary>
+    /// The instruction a shipped action starts with, or null for an action the user created. The
+    /// settings tab uses this for *Reset*: a seeded action goes back to its default text, while an
+    /// action with no predefined default has nothing to restore and keeps the button disabled.
+    /// </summary>
+    public static string? DefaultInstruction(string? id) =>
+        string.IsNullOrWhiteSpace(id)
+            ? null
+            : Defaults().FirstOrDefault(action => action.Id == id)?.Instruction;
+
+    /// <summary>
     /// The three actions a fresh install ships with, so the action bar is not empty and the feature is
     /// discoverable. Deleting them all is preserved: seeds are only used for a brand-new settings file.
     /// </summary>

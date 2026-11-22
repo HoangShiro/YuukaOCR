@@ -26,7 +26,7 @@
                 </Grid.ColumnDefinitions>
                 <TextBlock Text="{ui:Tr hook.proximityTop}" VerticalAlignment="Center" Style="{StaticResource YuukaTextStyle}" />
                 <!-- Window edge snapping: the marks are doubled (6 DIP) so the discrete steps read as steps. -->
-                <Slider x:Name="ProximityTopSlider" Grid.Column="1" Minimum="0" Maximum="400" TickFrequency="100" controls:SliderTicks.Thickness="6" />
+                <Slider x:Name="ProximityTopSlider" Grid.Column="1" Minimum="0" Maximum="400" TickFrequency="50" controls:SliderTicks.Thickness="6" />
                 <TextBlock x:Name="ProximityTopValue" Grid.Column="2" TextAlignment="Right"
                            VerticalAlignment="Center" Style="{StaticResource YuukaSubtleText}" />
             </Grid>
@@ -38,7 +38,7 @@
                     <ColumnDefinition Width="52" />
                 </Grid.ColumnDefinitions>
                 <TextBlock Text="{ui:Tr hook.proximityBottom}" VerticalAlignment="Center" Style="{StaticResource YuukaTextStyle}" />
-                <Slider x:Name="ProximityBottomSlider" Grid.Column="1" Minimum="0" Maximum="400" TickFrequency="100" controls:SliderTicks.Thickness="6" />
+                <Slider x:Name="ProximityBottomSlider" Grid.Column="1" Minimum="0" Maximum="400" TickFrequency="50" controls:SliderTicks.Thickness="6" />
                 <TextBlock x:Name="ProximityBottomValue" Grid.Column="2" TextAlignment="Right"
                            VerticalAlignment="Center" Style="{StaticResource YuukaSubtleText}" />
             </Grid>
@@ -50,7 +50,7 @@
                     <ColumnDefinition Width="52" />
                 </Grid.ColumnDefinitions>
                 <TextBlock Text="{ui:Tr hook.offsetTop}" VerticalAlignment="Center" Style="{StaticResource YuukaTextStyle}" />
-                <Slider x:Name="OffsetTopSlider" Grid.Column="1" Minimum="-100" Maximum="100" TickFrequency="50" controls:SliderTicks.Thickness="6" />
+                <Slider x:Name="OffsetTopSlider" Grid.Column="1" Minimum="-100" Maximum="100" TickFrequency="25" controls:SliderTicks.Thickness="6" />
                 <TextBlock x:Name="OffsetTopValue" Grid.Column="2" TextAlignment="Right"
                            VerticalAlignment="Center" Style="{StaticResource YuukaSubtleText}" />
             </Grid>
@@ -62,7 +62,7 @@
                     <ColumnDefinition Width="52" />
                 </Grid.ColumnDefinitions>
                 <TextBlock Text="{ui:Tr hook.offsetBottom}" VerticalAlignment="Center" Style="{StaticResource YuukaTextStyle}" />
-                <Slider x:Name="OffsetBottomSlider" Grid.Column="1" Minimum="-100" Maximum="100" TickFrequency="50" controls:SliderTicks.Thickness="6" />
+                <Slider x:Name="OffsetBottomSlider" Grid.Column="1" Minimum="-100" Maximum="100" TickFrequency="25" controls:SliderTicks.Thickness="6" />
                 <TextBlock x:Name="OffsetBottomValue" Grid.Column="2" TextAlignment="Right"
                            VerticalAlignment="Center" Style="{StaticResource YuukaSubtleText}" />
             </Grid>
@@ -74,7 +74,7 @@
                     <ColumnDefinition Width="52" />
                 </Grid.ColumnDefinitions>
                 <TextBlock Text="{ui:Tr hook.unhookDistance}" VerticalAlignment="Center" Style="{StaticResource YuukaTextStyle}" />
-                <Slider x:Name="UnhookSlider" Grid.Column="1" Minimum="0" Maximum="600" TickFrequency="100" controls:SliderTicks.Thickness="6" />
+                <Slider x:Name="UnhookSlider" Grid.Column="1" Minimum="0" Maximum="600" TickFrequency="50" controls:SliderTicks.Thickness="6" />
                 <TextBlock x:Name="UnhookValue" Grid.Column="2" TextAlignment="Right"
                            VerticalAlignment="Center" Style="{StaticResource YuukaSubtleText}" />
             </Grid>

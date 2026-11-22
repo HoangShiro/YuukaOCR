@@ -1,8 +1,9 @@
-<Window x:Class="YuukaOCR.App.Ui.SnipOverlay"
+﻿<Window x:Class="YuukaOCR.App.Ui.SnipOverlay"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ui="clr-namespace:YuukaOCR.App.Ui.Localization"
         Title="{ui:Tr snip.title}" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        Icon="pack://application:,,,/YuukaOCR;component/Assets/app-icon.png"
         ShowInTaskbar="False" Topmost="True" ResizeMode="NoResize" Cursor="Cross"
         SnapsToDevicePixels="True" UseLayoutRounding="True">
 

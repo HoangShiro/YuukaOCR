@@ -81,19 +81,24 @@ public static class SliderSpecs
         // Ticks are coarse on purpose: the request doubles their thickness, which only reads well when
         // there are few of them. Every default below sits exactly on one.
         new(FrameOpacity, 20, 100, 10, 100),
-        new(BackgroundOpacity, 20, 100, 10, 100),
+        // 90 % is the shipped background opacity: the window stays readable over whatever is behind it.
+        // A settings file that already stores its own value keeps it — only a missing key gets this.
+        new(BackgroundOpacity, 20, 100, 10, 90),
         new(FontSize, 8, 32, 4, 12),
         new(UiScale, 50, 200, 25, 100),
 
         new(SubWindowSpacing, 0, 60, 5, 5),
         new(MinSubWindowWidth, 120, 600, 20, 200),
 
-        // 100 px of snap range is forgiving without grabbing a window the user merely passed by.
-        new(HookProximityTop, 0, 400, 100, 100),
-        new(HookProximityBottom, 0, 400, 100, 100),
-        new(HookOffsetTop, -100, 100, 50, 0),
-        new(HookOffsetBottom, -100, 100, 50, 0),
-        new(UnhookDistance, 0, 600, 100, 100),
+        // Window edge snapping. These five steps are deliberately half of the old ones (100/50/100),
+        // so every slider shows twice as many ticks and a value can be set twice as precisely. The
+        // defaults stay on the grid, and every value an older build could store (a multiple of the old
+        // step) is still a multiple of the new one, so nothing moves on upgrade.
+        new(HookProximityTop, 0, 400, 50, 100),
+        new(HookProximityBottom, 0, 400, 50, 100),
+        new(HookOffsetTop, -100, 100, 25, 0),
+        new(HookOffsetBottom, -100, 100, 25, 0),
+        new(UnhookDistance, 0, 600, 50, 100),
 
         new(Spring, 0, 50, 10, 10),
         new(Damping, 0, 100, 10, 40),

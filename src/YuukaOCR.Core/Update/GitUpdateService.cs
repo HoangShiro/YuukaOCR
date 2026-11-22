@@ -22,6 +22,46 @@ public sealed class GitUpdateService
     private readonly LogService _log;
     private readonly string _repoRoot;
 
+    /// <summary>
+    /// <c>origin</c> of a checkout, or "" when this is not a git working copy. Read straight from the
+    /// config file — no <c>git</c> process, so it also works when git is not installed.
+    /// </summary>
+    public static string RemoteUrl(string repoRoot)
+    {
+        try
+        {
+            var config = Path.Combine(repoRoot, ".git", "config");
+            if (!File.Exists(config)) return "";
+
+            var lines = File.ReadAllLines(config);
+            var inOrigin = false;
+            foreach (var raw in lines)
+            {
+                var line = raw.Trim();
+                if (line.StartsWith('['))
+                {
+                    inOrigin = line.Equals("[remote \"origin\"]", StringComparison.OrdinalIgnoreCase);
+                    continue;
+                }
+                if (!inOrigin) continue;
+
+                var split = line.IndexOf('=');
+                if (split <= 0) continue;
+                if (!line[..split].Trim().Equals("url", StringComparison.OrdinalIgnoreCase)) continue;
+
+                return line[(split + 1)..].Trim();
+            }
+        }
+        catch (IOException)
+        {
+            // Unreadable config is the same as no remote: the caller falls back to the built-in name.
+        }
+        return "";
+    }
+
+    /// <summary>True when the folder is a git checkout, i.e. the pull-based update can work at all.</summary>
+    public static bool IsCheckout(string repoRoot) => Directory.Exists(Path.Combine(repoRoot, ".git"));
+
     public GitUpdateService(LogService log, string? repoRoot = null)
     {
         _log = log;
