@@ -219,7 +219,14 @@ public partial class PromptAgentTab : UserControl
                 Cursor = System.Windows.Input.Cursors.Hand
             };
 
-            if (selected) button.Background = (Brush)FindResource("YuukaAccent");
+            // Selected = accent fill with on-accent label, referenced rather than captured so the chip
+            // follows a theme switch while the tab is open.
+            if (selected)
+            {
+                button.SetResourceReference(Control.BackgroundProperty, "YuukaAccent");
+                button.SetResourceReference(Control.ForegroundProperty, "YuukaOnAccent");
+            }
+
             button.Click += OnActionTabClick;
             button.PreviewMouseLeftButtonDown += OnTabMouseDown;
             button.PreviewMouseMove += OnTabMouseMove;
@@ -257,7 +264,6 @@ public partial class PromptAgentTab : UserControl
         foreach (var key in ActionIcons.Keys)
         {
             var selected = string.Equals(key, currentIcon, StringComparison.OrdinalIgnoreCase);
-            var brush = (Brush)FindResource(selected ? "YuukaOnAccent" : "YuukaText");
 
             var button = new Button
             {
@@ -266,11 +272,15 @@ public partial class PromptAgentTab : UserControl
                 Margin = new Thickness(0, 0, 4, 4),
                 Style = (Style)FindResource("YuukaIconButton"),
                 Tag = key,
-                Content = ActionIcons.Glyph(key, 14, brush),
+
+                // The glyph names a theme resource instead of capturing a brush: a captured instance keeps
+                // the colour it was built with, so every icon here used to stay in the old theme after a
+                // light/dark switch until the tab was rebuilt.
+                Content = ActionIcons.Glyph(key, 14, selected ? "YuukaOnAccent" : "YuukaText"),
                 Cursor = System.Windows.Input.Cursors.Hand
             };
 
-            if (selected) button.Background = (Brush)FindResource("YuukaAccent");
+            if (selected) button.SetResourceReference(Control.BackgroundProperty, "YuukaAccent");
             button.Click += OnIconClick;
             IconPicker.Children.Add(button);
         }

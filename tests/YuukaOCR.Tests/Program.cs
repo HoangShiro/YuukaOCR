@@ -680,6 +680,53 @@ Test("WindowTracker: hooking keeps the bar where the user put it", () =>
     True(kept.Y == centred.Y, "the hook still owns the vertical axis");
 });
 
+Test("WindowTracker: a hooked bar travels with its window", () =>
+{
+    var settings = new AppSettings();
+    var mode = WindowTracker.ParseMode(settings.HookMode);
+
+    const double barWidth = 200;
+    const double barHeight = 50;
+    const double barLeft = 400;
+
+    var window = new ScreenRect(100, 100, 1100, 900);   // 1000x800 at 100,100
+    var anchor = WindowTracker.AnchorFor(window, barLeft);
+
+    (double X, double Y) Follow(ScreenRect target) => WindowTracker.Follow(
+        target, barWidth, barHeight, HookEdge.Bottom, mode,
+        settings.HookOffsetTop, settings.HookOffsetBottom, anchor);
+
+    var rest = Follow(window);
+    True(Math.Abs(rest.X - barLeft) < 0.001, "at rest the bar is exactly where the user left it");
+
+    // The whole movement, sampled: the bar must keep the *same* offset from the window at every step,
+    // which is what makes it move along with the window instead of being left behind on the old spot.
+    var offsets = new List<double>();
+    for (var dx = 0; dx <= 120; dx += 20)
+    {
+        var moved = new ScreenRect(window.Left + dx, window.Top, window.Right + dx, window.Bottom);
+        offsets.Add(Math.Round(Follow(moved).X - moved.Left, 3));
+    }
+
+    Equal("300,300,300,300,300,300,300", string.Join(",", offsets),
+        "the horizontal offset is identical at every step of the move");
+
+    // A window that slides left is the same operation in reverse.
+    var left = new ScreenRect(window.Left - 40, window.Top, window.Right - 40, window.Bottom);
+    True(Math.Abs(Follow(left).X - (barLeft - 40)) < 0.001, "moving the window left moves the bar left");
+
+    // Horizontal movement alone must not disturb the edge the bar is hooked to.
+    True(Follow(left).Y == rest.Y && Follow(new ScreenRect(700, 100, 1700, 900)).Y == rest.Y,
+        "a horizontal move leaves the vertical position untouched");
+
+    // Dragged to the far side, the bar stops at the work area's edge instead of following off screen.
+    var area = ScreenGeometry.WorkAreaAt(500, 500);
+    var far = new ScreenRect(area.Right - 100, 100, area.Right + 900, 900);
+    var clamped = Follow(far).X;
+    True(clamped <= area.Right - barWidth + 0.001, "the bar stays inside the work area when the window leaves it");
+    True(clamped > area.Right - barWidth - 1, "and sits right at the edge, not somewhere else");
+});
+
 // ---------------------------------------------------------------- action presets
 Test("AgentPreset: export then import restores order, names, icons and instructions", () =>
 {

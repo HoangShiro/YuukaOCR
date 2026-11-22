@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -73,6 +74,12 @@ public partial class ResultWindow : Window, IThemedWindow
 
     /// <summary>Unhooks the floating copy button's lifetime rules when the bubble is destroyed.</summary>
     private readonly IDisposable _selectionTracker;
+
+    /// <summary>
+    /// Copy buttons of the message boxes currently in the conversation, disposed whenever the list is
+    /// rebuilt — a message that is no longer on screen must not keep a popup alive.
+    /// </summary>
+    private readonly List<IDisposable> _messageTrackers = new();
 
     public ResultWindow(AppServices services)
     {
@@ -400,7 +407,7 @@ public partial class ResultWindow : Window, IThemedWindow
         var size = Math.Round(26 * scale);
 
         // Accent-filled button with on-accent ink: dark ink on a light theme, light ink on a dark one.
-        var stroke = (Brush)FindResource("YuukaOnAccent");
+        // Referenced, not captured — a theme switch while the bubble is open has to repaint the icons.
 
         // A half-written action (no instruction yet) is skipped: it would be a button that does nothing.
         foreach (var action in _services.Settings.Settings.Actions.Where(a => !string.IsNullOrWhiteSpace(a.Instruction)))
@@ -413,7 +420,7 @@ public partial class ResultWindow : Window, IThemedWindow
                 Style = (Style)FindResource("YuukaAccentIconButton"),
                 ToolTip = string.IsNullOrWhiteSpace(action.Name) ? L.T("agent.action.unnamed") : action.Name,
                 Tag = action,
-                Content = ActionIcons.Glyph(action.Icon, Math.Round(14 * scale), stroke)
+                Content = ActionIcons.Glyph(action.Icon, Math.Round(14 * scale), "YuukaOnAccent")
             };
 
             button.Click += OnActionClick;
@@ -423,15 +430,17 @@ public partial class ResultWindow : Window, IThemedWindow
         if (ActionBar.Children.Count == 0)
         {
             // Nothing registered: leave a hint instead of an empty strip so the bar still explains itself.
-            ActionBar.Children.Add(new TextBlock
+            var hint = new TextBlock
             {
                 Text = L.T("agent.actions.hint"),
-                Foreground = (Brush)FindResource("YuukaSubtle"),
                 FontSize = 9.5,
                 MaxWidth = 150,
                 TextWrapping = TextWrapping.Wrap,
                 VerticalAlignment = VerticalAlignment.Center
-            });
+            };
+
+            hint.SetResourceReference(TextBlock.ForegroundProperty, "YuukaSubtle");
+            ActionBar.Children.Add(hint);
         }
     }
 
@@ -542,15 +551,24 @@ public partial class ResultWindow : Window, IThemedWindow
     }
 
     /// <summary>Draws this bubble's slice of the shared conversation: user turns right, replies left.</summary>
-    private void RenderConversation()
+    private void RenderConversation() => RenderConversation(_services.Agent.History, _chatStart);
+
+    /// <summary>
+    /// Renders a supplied conversation from its first turn. The layout harness uses this overload to
+    /// exercise the real rendering path without inventing agent state.
+    /// </summary>
+    internal void RenderConversation(IReadOnlyList<ChatTurn> history) => RenderConversation(history, 0);
+
+    private void RenderConversation(IReadOnlyList<ChatTurn> history, int start)
     {
         if (AnswerList is null) return;
 
-        var history = _services.Agent.History;
-        var start = Math.Min(_chatStart, history.Count);
+        ClearConversation();
 
-        AnswerList.Children.Clear();
-        for (var i = start; i < history.Count; i++)
+        var first = Math.Min(start, history.Count);
+        var fontSize = Math.Max(10, _services.Settings.Settings.Theme.FontSize - 1);
+
+        for (var i = first; i < history.Count; i++)
         {
             var turn = history[i];
             var isUser = turn.IsUser;
@@ -561,24 +579,77 @@ public partial class ResultWindow : Window, IThemedWindow
                 Foreground = (Brush)FindResource(isUser ? "YuukaAccent" : "YuukaSubtle"),
                 FontSize = 9,
                 FontWeight = FontWeights.SemiBold,
-                Margin = new Thickness(0, i == start ? 0 : 6, 0, 1),
+                Margin = new Thickness(0, i == first ? 0 : 6, 0, 1),
                 HorizontalAlignment = isUser ? HorizontalAlignment.Right : HorizontalAlignment.Left
             });
 
-            AnswerList.Children.Add(new TextBlock
-            {
-                Text = turn.Text,
-                TextWrapping = TextWrapping.Wrap,
-                Foreground = (Brush)FindResource("YuukaText"),
-                FontFamily = (FontFamily)FindResource("YuukaFontFamily"),
-                FontSize = Math.Max(10, _services.Settings.Settings.Theme.FontSize - 1),
-                Margin = new Thickness(0, 0, 0, 2),
-                HorizontalAlignment = isUser ? HorizontalAlignment.Right : HorizontalAlignment.Left,
-                TextAlignment = isUser ? TextAlignment.Right : TextAlignment.Left
-            });
+            var body = CreateMessageBox(turn.Text, isUser, fontSize);
+
+            // Same affordance as the OCR text: select something and a copy button appears next to it.
+            _messageTrackers.Add(SelectionCopy.Attach(body, OnMessageCopied));
+            AnswerList.Children.Add(body);
         }
 
         AnswerPanel.Visibility = AnswerList.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>
+    /// One message body: a read-only <see cref="TextBox"/> that looks exactly like the label it replaced.
+    ///
+    /// A TextBox rather than a TextBlock because the user has to be able to select and copy what was said,
+    /// and a TextBox is the only WPF text element that selects by mouse, keeps the selection when the
+    /// focus moves on and copies on Ctrl+C without extra code. Everything that would make it look like an
+    /// input field — border, caret, background, padding, scrollbars — is switched off here, so the
+    /// conversation keeps the layout and rhythm it had.
+    /// </summary>
+    internal static TextBox CreateMessageBox(string text, bool isUser, double fontSize)
+    {
+        var box = new TextBox
+        {
+            Text = text,
+            IsReadOnly = true,
+            IsReadOnlyCaretVisible = false,
+            IsTabStop = false,
+            TextWrapping = TextWrapping.Wrap,
+            BorderThickness = new Thickness(0),
+            Background = Brushes.Transparent,
+            Padding = new Thickness(0),
+            Cursor = Cursors.IBeam,
+            FontSize = fontSize,
+            HorizontalAlignment = isUser ? HorizontalAlignment.Right : HorizontalAlignment.Left,
+            TextAlignment = isUser ? TextAlignment.Right : TextAlignment.Left,
+            Margin = new Thickness(0, 0, 0, 2),
+
+            // The selection is the point of the box: keep it painted once the focus moves to the chat box
+            // (that is what "my highlight disappeared" was about) and give it the theme's accent.
+            IsInactiveSelectionHighlightEnabled = true
+        };
+
+        // Theme brushes are re-created on every theme switch, so they are referenced, not copied: a
+        // captured Brush instance would keep the old colour until the bubble was rebuilt.
+        box.SetResourceReference(Control.ForegroundProperty, "YuukaText");
+        box.SetResourceReference(Control.FontFamilyProperty, "YuukaFontFamily");
+        box.SetResourceReference(TextBoxBase.SelectionBrushProperty, "YuukaAccent");
+        // A disabled internal scroller: the message wraps to its own height, so there is nothing to scroll
+        // and the wheel keeps reaching the conversation's ScrollViewer.
+        box.SetValue(ScrollViewer.VerticalScrollBarVisibilityProperty, ScrollBarVisibility.Disabled);
+        box.SetValue(ScrollViewer.HorizontalScrollBarVisibilityProperty, ScrollBarVisibility.Disabled);
+
+        return box;
+    }
+
+    private void ClearConversation()
+    {
+        foreach (var tracker in _messageTrackers) tracker.Dispose();
+        _messageTrackers.Clear();
+        AnswerList.Children.Clear();
+    }
+
+    /// <summary>After the floating copy button wrote a message fragment to the clipboard.</summary>
+    private void OnMessageCopied()
+    {
+        _services.Clipboard.SuppressNext();
+        ShowHint(L.T("common.copied"));
     }
 
     // ------------------------------------------------------------------ drag

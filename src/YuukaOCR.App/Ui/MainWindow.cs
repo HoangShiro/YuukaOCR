@@ -32,7 +32,12 @@ public partial class MainWindow : Window, IThemedWindow
 
     private readonly AppServices _services;
     private readonly SpringMotion _spring = new();
-    private readonly DispatcherTimer _hookTimer = new() { Interval = TimeSpan.FromMilliseconds(140) };
+    /// <summary>
+    /// Polls the hook. 20 Hz, not 7: while the target window is being dragged the bar has to keep up
+    /// with it, and the spring on top of the poll supplies the smoothing — a slow poll shows up as the
+    /// bar lagging behind the window instead of trailing it.
+    /// </summary>
+    private readonly DispatcherTimer _hookTimer = new() { Interval = TimeSpan.FromMilliseconds(50) };
 
     // Physics runs on its own timer rather than CompositionTarget.Rendering: WPF only raises
     // Rendering when a new frame is produced, and moving the window with SetWindowPos does not dirty
@@ -341,14 +346,19 @@ public partial class MainWindow : Window, IThemedWindow
                 return;
             }
 
-            var (targetX, targetY) = TargetFor(window.Value, bounds.Value, _hook.Edge, settings);
+            var (targetX, targetY) = WindowTracker.Follow(
+                window.Value, bounds.Value.Width, bounds.Value.Height, _hook.Edge,
+                WindowTracker.ParseMode(settings.HookMode),
+                settings.HookOffsetTop, settings.HookOffsetBottom,
+                _hook.AnchorX);
+
             if (Math.Abs(targetY - bounds.Value.Top) > settings.UnhookDistance)
             {
                 Unhook();
                 return;
             }
 
-            // Spring coordinates are the window corner; TargetFor returns the pill corner.
+            // Spring coordinates are the window corner; Follow returns the pill corner.
             _spring.SetTarget(targetX - pad, targetY - pad);
             return;
         }
@@ -370,18 +380,10 @@ public partial class MainWindow : Window, IThemedWindow
     }
 
     /// <summary>
-    /// Where the bar belongs for a hooked window. The math (and the "stay on screen even when the target
-    /// is fullscreen" rule) lives in Core so it can be tested without a window. The bar's own left edge
-    /// is passed in, so the hook only ever moves the bar along the axis it owns.
+    /// Where the bar belongs for a hooked window is <see cref="WindowTracker.Follow"/>: the math (and the
+    /// "stay on screen even when the target is fullscreen" rule) lives in Core so it can be tested
+    /// without a window.
     /// </summary>
-    private static (double X, double Y) TargetFor(ScreenRect window, ScreenRect bar, HookEdge edge,
-        AppSettings settings) =>
-        WindowTracker.TargetFor(
-            window, bar.Width, bar.Height, edge,
-            WindowTracker.ParseMode(settings.HookMode),
-            settings.HookOffsetTop, settings.HookOffsetBottom,
-            bar.Left);
-
     private void Unhook()
     {
         _hook = null;
@@ -439,6 +441,14 @@ public partial class MainWindow : Window, IThemedWindow
         var (targetX, targetY) = ClampPoint(_spring.TargetX, _spring.TargetY);
         _spring.SetTarget(targetX, targetY);
         SavePosition();
+
+        // The user just chose a new place for the bar: re-anchor the hook to where it was dropped. Without
+        // this the next tick would pull it back to the relative position captured when it first stuck.
+        if (_hook is not null && WindowTracker.GetBounds(_hook.Handle) is { } window)
+        {
+            var pad = PadPixels((int)targetX, (int)targetY);
+            _hook = _hook with { AnchorX = WindowTracker.AnchorFor(window, targetX + pad) };
+        }
     }
 
     private void OnBarRightClick(object sender, MouseButtonEventArgs e)

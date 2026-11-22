@@ -9,6 +9,7 @@ using YuukaOCR.App.Ui;
 using YuukaOCR.App.Ui.Controls;
 using YuukaOCR.App.Ui.Tabs;
 using YuukaOCR.Core.Agent;
+using YuukaOCR.Core.Interop;
 using YuukaOCR.Core.Localization;
 using YuukaOCR.Core.Settings;
 
@@ -34,6 +35,9 @@ internal static class LayoutProbe
         SnappingTicks();
         SelectionPopupLifetime(services);
         SelectionContext(services);
+        ChatSelection(services);
+        ActionIconTheme(services);
+        HookFollow();
         InputClipping(services);
         TickInk();
         ThemeContrast();
@@ -426,6 +430,331 @@ internal static class LayoutProbe
         for (var i = 0; i < withSelection.Length; i++)
             if (withSelection[i] != without[i]) changed++;
         return changed;
+    }
+
+    /// <summary>
+    /// The conversation must be readable *and* quotable: the user's turns and the agent's replies are both
+    /// selectable, copyable, and keep their highlight when the focus moves on — while the
+    /// label-then-message layout stays exactly what it was when the bodies were plain TextBlocks.
+    /// </summary>
+    private static void ChatSelection(AppServices services)
+    {
+        var result = new ResultWindow(services);
+
+        try
+        {
+            result.ShowText("Yuuka reads the text inside the selection.", null, activate: false);
+
+            result.RenderConversation(
+            [
+                new ChatTurn(AgentPrompts.UserRole, "what does this say?", "10:00"),
+                new ChatTurn(AgentPrompts.AssistantRole, "It says the text inside the selection.", "10:01")
+            ]);
+            Pump();
+
+            if (result.FindName("AnswerList") is not StackPanel list)
+            {
+                Fail("chat selection: AnswerList not found");
+                return;
+            }
+
+            var bodies = list.Children.OfType<TextBox>().ToList();
+            var labels = list.Children.OfType<TextBlock>().ToList();
+
+            if (bodies.Count != 2)
+            {
+                Fail($"chat selection: {bodies.Count} selectable message(s), expected 2");
+                return;
+            }
+
+            var order = string.Join(",", list.Children.OfType<FrameworkElement>()
+                .Select(child => child is TextBox ? "body" : "label"));
+
+            var theme = services.Settings.Settings.Theme;
+
+            var checks = new List<string>
+            {
+                $"labels:{labels.Count == 2}",
+                $"order:{order == "label,body,label,body"}",
+                $"read-only:{bodies.All(b => b.IsReadOnly)}",
+                $"no-border:{bodies.All(b => b.BorderThickness == new Thickness(0))}",
+                $"transparent:{bodies.All(b => b.Background == Brushes.Transparent)}",
+                $"wrapping:{bodies.All(b => b.TextWrapping == TextWrapping.Wrap)}",
+                $"user-right:{bodies[0].HorizontalAlignment == HorizontalAlignment.Right && bodies[0].TextAlignment == TextAlignment.Right}",
+                $"agent-left:{bodies[1].HorizontalAlignment == HorizontalAlignment.Left && bodies[1].TextAlignment == TextAlignment.Left}",
+                $"inactive-highlight:{bodies.All(b => b.IsInactiveSelectionHighlightEnabled)}",
+                $"tab-stop-off:{bodies.All(b => !b.IsTabStop)}",
+                $"theme-ink:{Colour(bodies[0].Foreground) == ColorOf(theme.Text)}"
+            };
+
+            // Both sides: pick a word, see it painted, and the copy command becomes available.
+            var ink = new List<string>();
+            var chat = result.FindName("ChatBox") as TextBox;
+
+            foreach (var body in bodies)
+            {
+                // The user selects with the mouse, so the box has the focus when the highlight appears;
+                // moving the focus on afterwards is what has to keep it painted.
+                Keyboard.Focus(body);
+                Pump();
+
+                body.Select(0, 4);
+                Pump();
+                checks.Add($"selectable:{body.SelectedText.Length == 4}");
+                checks.Add($"copy-command:{ApplicationCommands.Copy.CanExecute(null, body)}");
+                checks.Add($"sized:{body.ActualWidth > 1 && body.ActualHeight > 1}");
+
+                var focused = HighlightInk(body);
+                checks.Add($"highlight-painted:{focused > 0}");
+
+                // Typing the follow-up question must not make the quoted message disappear.
+                if (chat is not null)
+                {
+                    Keyboard.Focus(chat);
+                    Pump();
+                }
+
+                var inactive = HighlightInk(body);
+                ink.Add($"{focused}/{inactive}");
+                checks.Add($"inactive-painted:{inactive > 0}");
+            }
+
+            checks.Add($"user-text:{bodies[0].SelectedText == "what"}");
+            checks.Add($"agent-text:{bodies[1].SelectedText == "It s"}");
+
+            var failures = checks.Where(c => c.EndsWith(":False", StringComparison.Ordinal)).ToList();
+            if (failures.Count > 0)
+                Fail($"chat selection: {string.Join(", ", failures)} " +
+                     $"(ink {string.Join("/", ink)}, sizes " +
+                     $"{string.Join(" ", bodies.Select(b => $"{b.ActualWidth:0}x{b.ActualHeight:0}"))})");
+            else
+                Pass($"conversation messages are selectable and copyable ({checks.Count} checks, " +
+                     $"highlight ink {string.Join("/", ink)} px)");
+        }
+        catch (Exception ex)
+        {
+            Fail($"chat selection: {ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            result.Close();
+        }
+    }
+
+    /// <summary>
+    /// Action icons must take their ink from the live theme, not from a brush captured when the button was
+    /// built: switching between a dark and the light preset used to leave every glyph — and the selected
+    /// tile's accent fill — in the old palette until the tab was rebuilt.
+    /// </summary>
+    private static void ActionIconTheme(AppServices services)
+    {
+        AppearanceSync.Initialize(services.Settings);
+
+        var snapshot = services.Settings.Settings.Actions.Select(a => a.Clone()).ToList();
+        var originalPreset = services.Settings.Settings.Theme.Preset;
+
+        services.Settings.Update(s => s.Actions.Add(new AgentAction
+        {
+            Id = "probe-icons",
+            Name = "Probe icons",
+            Icon = "chat",
+            Instruction = "Reply with OK."
+        }), save: false);
+
+        var tab = new PromptAgentTab();
+        tab.Initialize(services);
+        var host = Host(tab, 520, 900);
+
+        try
+        {
+            if (tab.FindName("IconPicker") is not Panel picker || tab.FindName("ActionTabs") is not Panel tabs)
+            {
+                Fail("action icon theme: IconPicker/ActionTabs not found");
+                return;
+            }
+
+            var keys = ActionIcons.Keys.ToList();
+
+            // The picker highlights the *selected action's* icon, and the selected action is the first one
+            // in the list — not necessarily the one this probe appended.
+            var selectedIcon = services.Settings.Settings.Actions.FirstOrDefault()?.Icon;
+            var selectedIndex = keys.FindIndex(k => string.Equals(k, selectedIcon, StringComparison.OrdinalIgnoreCase));
+
+            List<Color> Strokes() =>
+                Descendants<System.Windows.Shapes.Path>(picker).Select(p => Colour(p.Stroke)).ToList();
+
+            List<Color> Expected(YuukaOCR.Core.Settings.ThemePalette palette)
+            {
+                var list = Enumerable.Repeat(ColorOf(palette.Text), keys.Count).ToList();
+                if (selectedIndex >= 0) list[selectedIndex] = ColorOf(palette.OnAccent);
+                return list;
+            }
+
+            // The settings window's own repaint path, applied by hand because this host is not registered.
+            var dark = ThemePresets.Palette(originalPreset);
+            Theme.Apply(host, services.Settings.Settings.Theme);
+            host.UpdateLayout();
+
+            var darkStrokes = Strokes();
+            var darkOk = darkStrokes.SequenceEqual(Expected(dark));
+
+            // Switch to the light preset: everything on this tab has to follow, with no rebuild and no restart.
+            services.Settings.Update(s => s.Theme.Preset = "daylight", save: false);
+            var light = ThemePresets.Palette("daylight");
+            Theme.Apply(host, services.Settings.Settings.Theme);
+            host.UpdateLayout();
+
+            var lightStrokes = Strokes();
+            var lightOk = lightStrokes.SequenceEqual(Expected(light));
+
+            var chip = tabs.Children.OfType<Button>().FirstOrDefault();
+            var chipAccent = chip is not null && Colour(chip.Background) == ColorOf(light.Accent);
+
+            // Painted, not just set: the chip template used to ignore Background entirely, so a selected
+            // tab looked exactly like an unselected one.
+            var accentPixels = chip is null ? 0 : PixelsOf(Snapshot(chip), ColorOf(light.Accent));
+            var area = chip is null ? 0 : Math.Max(1, (int)(chip.ActualWidth * chip.ActualHeight));
+            var chipPainted = accentPixels > area * 0.15;
+
+            var checks = new List<string>
+            {
+                $"glyph-count:{darkStrokes.Count == keys.Count}",
+                $"dark-ink:{darkOk}",
+                $"light-ink:{lightOk}",
+                $"switch-changes-ink:{lightStrokes.Count > 1 && lightStrokes[1] != darkStrokes[1]}",
+                $"chip-accent:{chipAccent}",
+                $"chip-painted:{chipPainted}"
+            };
+
+            var failures = checks.Where(c => c.EndsWith(":False", StringComparison.Ordinal)).ToList();
+            if (failures.Count > 0)
+                Fail($"action icon theme: {string.Join(", ", failures)} " +
+                     $"({accentPixels}/{area} accent px, dark {Describe(darkStrokes)} light {Describe(lightStrokes)})");
+            else
+                Pass($"action icons follow a live theme switch ({checks.Count} checks, " +
+                     $"{accentPixels}/{area} accent px on the selected tab)");
+        }
+        catch (Exception ex)
+        {
+            Fail($"action icon theme: {ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            host.Close();
+            services.Settings.Update(s =>
+            {
+                s.Theme.Preset = originalPreset;
+                s.Actions = snapshot.Select(a => a.Clone()).ToList();
+            }, save: false);
+        }
+    }
+
+    private static Color Colour(Brush? brush) => brush is SolidColorBrush solid ? solid.Color : Colors.Transparent;
+
+    private static string Describe(IEnumerable<Color> colours) =>
+        string.Join(" ", colours.Select(c => c.ToString()).Distinct());
+
+    /// <summary>
+    /// The follow math against real window bounds, not a made-up rectangle: a window moved sideways has to
+    /// produce a target that moves by the same amount while the bar keeps its offset inside the window.
+    /// This is the coordinate-system check (DWM frame bounds, physical pixels) behind the hook.
+    /// </summary>
+    private static void HookFollow()
+    {
+        var host = new Window
+        {
+            Width = 360,
+            Height = 240,
+            WindowStyle = WindowStyle.None,
+            ShowInTaskbar = false,
+            ShowActivated = false,
+            WindowStartupLocation = WindowStartupLocation.Manual,
+            Left = 200,
+            Top = 200,
+            Content = new Border()
+        };
+
+        host.Show();
+
+        try
+        {
+            var handle = new System.Windows.Interop.WindowInteropHelper(host).Handle;
+            var start = WindowTracker.GetBounds(handle);
+
+            if (start is null)
+            {
+                Fail("hook follow: the host window has no bounds");
+                return;
+            }
+
+            const double barWidth = 200;
+            const double barHeight = 50;
+
+            // The bar sits 40 px inside the window's left edge, hooked to the bottom edge.
+            var anchor = WindowTracker.AnchorFor(start.Value, start.Value.Left + 40);
+
+            var checks = new List<string>();
+            var rest = WindowTracker.Follow(start.Value, barWidth, barHeight, HookEdge.Bottom,
+                HookMode.Outside, 0, 0, anchor);
+            checks.Add($"at-rest:{Math.Abs(rest.X - (start.Value.Left + 40)) < 0.001}");
+
+            foreach (var step in new[] { 40, 120, 240 })
+            {
+                host.Left = 200 + step;
+                Pump();
+
+                var moved = WindowTracker.GetBounds(handle);
+                if (moved is null)
+                {
+                    checks.Add($"moved-{step}:False");
+                    continue;
+                }
+
+                var (x, y) = WindowTracker.Follow(moved.Value, barWidth, barHeight, HookEdge.Bottom,
+                    HookMode.Outside, 0, 0, anchor);
+
+                // Real DWM bounds carry the frame offsets, and Left is in DIPs while the bounds are physical
+                // pixels, so compare the *actual* travel of the window with the bar's.
+                var travel = moved.Value.Left - start.Value.Left;
+                var offset = x - moved.Value.Left;
+                checks.Add($"offset-{step}:{Math.Abs(offset - 40) < 0.001}");
+                checks.Add($"travels-{step}:{Math.Abs(x - rest.X - travel) < 0.001}");
+                checks.Add($"edge-{step}:{Math.Abs(y - (moved.Value.Top - barHeight)) < 0.001}");
+
+                // The old formula — the bar's own fixed left edge, fed back in as an absolute target — is
+                // what left the bar behind. It must not reproduce the new travel, or this probe is blind.
+                var stale = WindowTracker.TargetFor(moved.Value, barWidth, barHeight, HookEdge.Bottom,
+                    HookMode.Outside, 0, 0, rest.X);
+                checks.Add($"old-formula-stays-put:{Math.Abs(stale.X - rest.X) < 0.001}");
+            }
+
+            var failures = checks.Where(c => c.EndsWith(":False", StringComparison.Ordinal)).ToList();
+            if (failures.Count > 0) Fail($"hook follow: {string.Join(", ", failures)}");
+            else Pass($"a hooked bar follows a real window across the screen ({checks.Count} checks)");
+        }
+        catch (Exception ex)
+        {
+            Fail($"hook follow: {ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            host.Close();
+        }
+    }
+
+    /// <summary>Opaque pixels in a BGRA snapshot that match a colour (premultiplied, so opaque is verbatim).</summary>
+    private static int PixelsOf(byte[] pixels, Color colour, int tolerance = 6)
+    {
+        var count = 0;
+        for (var i = 0; i + 3 < pixels.Length; i += 4)
+        {
+            if (pixels[i + 3] < 200) continue;
+            if (Math.Abs(pixels[i] - colour.B) > tolerance) continue;
+            if (Math.Abs(pixels[i + 1] - colour.G) > tolerance) continue;
+            if (Math.Abs(pixels[i + 2] - colour.R) > tolerance) continue;
+            count++;
+        }
+        return count;
     }
 
     /// <summary>

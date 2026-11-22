@@ -22,13 +22,22 @@ public enum HookMode
     Inside
 }
 
+/// <summary>
+/// A window the bar can stick to, plus everything needed to keep it stuck.
+///
+/// <see cref="AnchorX"/> is the bar's left edge measured from the target's left edge, captured at the
+/// moment the hook was made. Every later tick recomputes the position from it, which is what makes the
+/// bar travel *with* the window instead of staying at a fixed screen coordinate while the window slides
+/// out from under it. It is also re-captured whenever the user drags the bar to a new place.
+/// </summary>
 public sealed record HookCandidate(
     IntPtr Handle,
     HookEdge Edge,
     double TargetX,
     double TargetY,
     ScreenRect WindowBounds,
-    string ProcessName);
+    string ProcessName,
+    double AnchorX);
 
 /// <summary>
 /// Finds the window the main bar should "stick" to. Everything the old version did inline inside the
@@ -137,6 +146,42 @@ public static class WindowTracker
         int offsetBottom,
         double? barLeft = null)
     {
+        var x = barLeft ?? window.Left + (window.Width - barWidth) / 2.0;
+        return Compute(window, barWidth, barHeight, edge, mode, offsetTop, offsetBottom, x);
+    }
+
+    /// <summary>
+    /// Where the bar belongs on every tick *while it is hooked*.
+    ///
+    /// <paramref name="anchorX"/> is the bar's left edge relative to the target's left edge (see
+    /// <see cref="AnchorFor"/>), not an absolute screen coordinate: the bar then keeps its place inside
+    /// the window and follows it when the window is moved — including horizontally, which is where a
+    /// fixed absolute X used to leave the bar behind.
+    /// </summary>
+    public static (double X, double Y) Follow(
+        ScreenRect window,
+        double barWidth,
+        double barHeight,
+        HookEdge edge,
+        HookMode mode,
+        int offsetTop,
+        int offsetBottom,
+        double anchorX) =>
+        Compute(window, barWidth, barHeight, edge, mode, offsetTop, offsetBottom, window.Left + anchorX);
+
+    /// <summary>The bar's left edge measured from the target's left edge — the value to remember.</summary>
+    public static double AnchorFor(ScreenRect window, double barLeft) => barLeft - window.Left;
+
+    private static (double X, double Y) Compute(
+        ScreenRect window,
+        double barWidth,
+        double barHeight,
+        HookEdge edge,
+        HookMode mode,
+        int offsetTop,
+        int offsetBottom,
+        double x)
+    {
         var area = ScreenGeometry.WorkAreaAt(window.Left + window.Width / 2, window.Top + window.Height / 2);
 
         var inside = mode == HookMode.Inside;
@@ -156,8 +201,6 @@ public static class WindowTracker
 
             if (y < area.Top) y = window.Top + offsetBottom;
         }
-
-        var x = barLeft ?? window.Left + (window.Width - barWidth) / 2.0;
 
         x = Math.Clamp(x, area.Left, Math.Max(area.Left, area.Right - barWidth));
         y = Math.Clamp(y, area.Top, Math.Max(area.Top, area.Bottom - barHeight));
@@ -233,11 +276,14 @@ public static class WindowTracker
 
             if (distance >= bestDistance) return true;
 
-            var (targetX, targetY) = TargetFor(window, barWidth, barHeight, edge, mode, offsetTop, offsetBottom,
-                keepHorizontalPosition ? barLeft : null);
+            // Where the bar sits inside the window, remembered for every tick after this one. Keeping
+            // the user's horizontal position means the anchor is taken from the live bar; without one
+            // (a caller that has no bar yet) the anchor centres the bar on the edge.
+            var anchorX = keepHorizontalPosition ? AnchorFor(window, barLeft) : (window.Width - barWidth) / 2.0;
+            var (targetX, targetY) = Follow(window, barWidth, barHeight, edge, mode, offsetTop, offsetBottom, anchorX);
 
             bestDistance = distance;
-            best = new HookCandidate(handle, edge, targetX, targetY, window, ProcessNameOf(handle));
+            best = new HookCandidate(handle, edge, targetX, targetY, window, ProcessNameOf(handle), anchorX);
             return true;
         }, IntPtr.Zero);
 

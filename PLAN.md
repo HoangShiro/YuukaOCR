@@ -373,13 +373,16 @@ ran (CLI, logs — no GUI interaction, as required).
 | 13 | Fixed: the floating copy button outlived the selection | `SelectionCopy.Track(box, popup)` — focus loss, window deactivation/hide, click-away | `xamlcheck` probe `selection copy button closes on click-away, click-inside-kept, cleared, focus-lost, window-hidden` |
 | 14 | Fixed: clicking into the chat box lost the agent's context | `ResultWindow._pinnedSelection` + `CurrentContext()` reading it; `IsInactiveSelectionHighlightEnabled` keeps the highlight painted | `xamlcheck` probe `selection context survives focus moving to the chat box` (9 checks, including the live-highlight-lost case); it fails on the previous live-read code |
 | 15 | Fixed: the app icon was a hard white square | `tools/makeicon.py` 20 % rounded mask, RGBA, AND mask in the DIB entries | `makeicon.py --check`; corner alpha 0 in all 10 ICO entries and in `ExtractAssociatedIcon` of the published exe |
+| 16 | Fixed: the hooked bar did not move when the target window was moved sideways | `HookCandidate.AnchorX` (bar left − window left) + `WindowTracker.Follow`; `MainWindow.HookTick` recomputes from it every tick, `EndDrag` re-anchors after the user drags the bar, poll 140 → 50 ms | test `WindowTracker: a hooked bar travels with its window` (offset identical at every step of a 0..120 px move, clamping at the work-area edge); `xamlcheck` probe `a hooked bar follows a real window across the screen` (13 checks against live DWM bounds, including a `old-formula-stays-put` contrast check) |
+| 17 | Chat messages were plain labels: no selection, no copy | `ResultWindow.CreateMessageBox` (read-only TextBox styled as a label) + `SelectionCopy.Attach` per message, trackers disposed on rebuild | `xamlcheck` probe `conversation messages are selectable and copyable` (23 checks: both sides selectable, `ApplicationCommands.Copy` enabled, highlight still painted after focus moves to the chat box, label/body order and alignment unchanged) |
+| 18 | Action icon colours ignored the theme | `ActionIcons.Glyph(key, size, resourceKey)` → `SetResourceReference(Shape.Stroke)`; same for the icon picker, the action chips and the bubble's action bar; `YuukaChipButton` paints `{TemplateBinding Background}` | `xamlcheck` probe `action icons follow a live theme switch` (6 checks: dark palette ink, then Daylight after a preset change with no rebuild; 1368/1612 px of the selected chip painted in the new accent) |
 
 ### Verification (CLI only)
 
 ```
 dotnet build YuukaOCR.slnx -c Release                     Build succeeded, 0 warnings, 0 errors
-dotnet run --project tests/YuukaOCR.Tests -c Release       52/52 passed
-dotnet run --project tools/xamlcheck -c Release            12 windows/tabs + 26 probes, all passed
+dotnet run --project tests/YuukaOCR.Tests -c Release       53/53 passed
+dotnet run --project tools/xamlcheck -c Release            12 windows/tabs + 29 probes, all passed
 dotnet publish ... -r win-x64 -o publish                   YuukaOCR.exe 341,504 B, version 2.1.0.0
 ```
 
@@ -389,6 +392,9 @@ Probes worth naming:
 OK  window edge snapping: ProximityTop 9, ProximityBottom 9, OffsetTop 9, OffsetBottom 9, Unhook 13 marks drawn at the tab's own width
 OK  action bar sync: 3 -> 4 -> Renamed action -> 3 buttons
 OK  ChatBox at 100/125/150 %: 30.4 / 34.4 / 37.6 DIP for a 23.6 / 27.5 / 31.4 DIP line
+OK  a hooked bar follows a real window across the screen (13 checks)
+OK  conversation messages are selectable and copyable (23 checks, highlight ink 1428/1428/893/893 px)
+OK  action icons follow a live theme switch (6 checks, 1368/1612 accent px on the selected tab)
 ```
 
 The mark count is rendered through a `VisualBrush`: `RenderTargetBitmap.Render(element)` includes the

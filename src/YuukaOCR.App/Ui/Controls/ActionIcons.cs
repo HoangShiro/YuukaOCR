@@ -54,18 +54,35 @@ public static class ActionIcons
     };
 
     /// <summary>Builds a stroked glyph for a button, sized to <paramref name="size"/>.</summary>
-    public static UIElement Glyph(string? key, double size, Brush stroke, double thickness = 1.4)
+    public static UIElement Glyph(string? key, double size, Brush stroke, double thickness = 1.4) =>
+        Build(key, size, thickness, path => path.Stroke = stroke);
+
+    /// <summary>
+    /// Builds a glyph whose colour is a *theme resource key* rather than a brush instance.
+    ///
+    /// <see cref="Theme.Apply"/> replaces the brush objects in a window's resources on every theme switch;
+    /// a Path holding a captured Brush therefore keeps the old colour until it is rebuilt, which is why
+    /// icons used to stay dark-theme coloured after switching to light. A resource reference re-resolves
+    /// itself, so the icon follows the theme immediately.
+    /// </summary>
+    public static UIElement Glyph(string? key, double size, string strokeResourceKey, double thickness = 1.4) =>
+        Build(key, size, thickness, path =>
+            path.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, strokeResourceKey));
+
+    private static UIElement Build(string? key, double size, double thickness,
+        Action<System.Windows.Shapes.Path> configure)
     {
         var path = new System.Windows.Shapes.Path
         {
             Data = Geometry.Parse(Data(key)),
-            Stroke = stroke,
             StrokeThickness = thickness,
             StrokeStartLineCap = PenLineCap.Round,
             StrokeEndLineCap = PenLineCap.Round,
             StrokeLineJoin = PenLineJoin.Round,
             SnapsToDevicePixels = true
         };
+
+        configure(path);
 
         // A Viewbox keeps every glyph the same size even though the path data are hand-written.
         return new System.Windows.Controls.Viewbox

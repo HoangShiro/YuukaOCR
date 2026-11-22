@@ -93,7 +93,7 @@ providers, file loading) is testable without opening a window.
 | File | Responsibility |
 | --- | --- |
 | `NativeMethods.cs` | All P/Invoke (user32, kernel32, gdi32, dwmapi, shcore) + structs + constants. One file so it stays auditable. |
-| `WindowTracker.cs` | Finds the window to snap to: filters top-level windows, skips system processes, checks that the window is really on top at its centre, computes the target for the top/bottom edge. `HookMode { Outside, Inside }` decides whether the bar lands just past the outer edge or along the inner edge, and every target is clamped into the monitor work area so a fullscreen app cannot push the bar off-screen. `ParseMode`/`SerializeMode`/`NormalizeMode` map the stored `hook_mode` string. |
+| `WindowTracker.cs` | Finds the window to snap to: filters top-level windows, skips system processes, checks that the window is really on top at its centre, computes the target for the top/bottom edge. `HookMode { Outside, Inside }` decides whether the bar lands just past the outer edge or along the inner edge, and every target is clamped into the monitor work area so a fullscreen app cannot push the bar off-screen. `AnchorFor`/`Follow` keep the bar's offset inside the window so it travels with it horizontally, while `TargetFor` is the one-shot placement used when the hook is made. `ParseMode`/`SerializeMode`/`NormalizeMode` map the stored `hook_mode` string. |
 | `ScreenCapture.cs` | BitBlt → top-down BGRA buffer. |
 | `ScreenGeometry.cs` | Enumerates monitors, work area, DPI scale, `DisplayConfigHash()` (sha256 of the layout). |
 | `WindowMover.cs` | Positions the window in **physical pixels** (`SetWindowPos`), hidden from Alt+Tab. |
@@ -159,7 +159,7 @@ reopens it on the tab the user was on) instead of re-binding every label.
 | `Ui/Controls/TickMarks.cs` | Draws the tick marks and their numbers under a slider. WPF only renders ticks through a `TickBar`, and the app's slider template is hand-written, so this element does it directly: one line per step, the passed part in the accent colour, the numbers laid out left to right with colliding labels dropped, and the maximum always included. |
 | `Ui/PngEncoder.cs` | `CapturedImage` / `BitmapSource` → PNG bytes. |
 | `Ui/SelectionCopy.cs` | `Attach(TextBox)` → floating icon-only copy button next to the selection, positioned in the box's own coordinate space so it follows a scrolled line. Used by the result bubble and every History row. `Track(box, popup)` owns the button's lifetime: it hides when the box loses keyboard focus (unless focus went into the popup itself), when the window is deactivated, and on any click outside the box. The popup stays `StaysOpen="True"` on purpose — a self-closing popup captures the mouse and eats the drag that creates the selection — so those conditions are explicit. |
-| `Ui/Controls/ActionIcons.cs` | The icon table: path data in a 16×16 box by **key** (`chat`, `translate`, `summarize`, `explain`, `check`, `list`, `code`, `search`, `star`, `bulb`, `wand`, `quill`) plus the chrome glyphs (`copy`, `send`, `expand`, `collapse`, `remove`, `plus`), and `Glyph(key, size, brush)`. Core stores the key, this turns it into pixels. |
+| `Ui/Controls/ActionIcons.cs` | The icon table: path data in a 16×16 box by **key** (`chat`, `translate`, `summarize`, `explain`, `check`, `list`, `code`, `search`, `star`, `bulb`, `wand`, `quill`) plus the chrome glyphs (`copy`, `send`, `expand`, `collapse`, `remove`, `plus`), and `Glyph(key, size, brush)` / `Glyph(key, size, "YuukaText")` — the second overload binds the stroke to a theme resource so the glyph follows a theme switch. Core stores the key, this turns it into pixels. |
 | `Ui/Controls/SliderSetup.cs` | `Apply(slider, key)` — pushes a `SliderSpec`'s range/step into a `Slider`. Every tab calls it, so the XAML numbers are only the designer preview. |
 | `Ui/Tabs/*.xaml(.cs)` | 8 tabs: System, Appearance, Layout, Hooking, Prompt/Agent, History, Status, Console. |
 
@@ -277,6 +277,9 @@ sequenceDiagram
 | 44 | Drag-and-drop action tabs, synced to the Action Bar | Prompt/Agent tab (`OnTabMouseDown`/`OnTabMouseMove`/`OnTabDrop`), `Ui/ResultWindow.cs` |
 | 45 | Action preset import/export (JSON, validated, all-or-nothing) | `Agent/AgentPreset.cs`, Prompt/Agent tab |
 | 46 | GitHub release check, download, install; git pull kept for checkouts | `Update/GitHubUpdateService.cs`, `Update/AppVersion.cs`, System tab, `App.xaml.cs` |
+| 47 | Hooked bar travels with the target window, horizontally too | `Interop/WindowTracker.cs` (`AnchorFor`, `Follow`, `HookCandidate.AnchorX`), `Ui/MainWindow.cs` (`HookTick`, `EndDrag` re-anchor, 50 ms poll) |
+| 48 | Conversation messages are selectable and copyable | `Ui/ResultWindow.cs` (`CreateMessageBox`, `RenderConversation`, `_messageTrackers`), `Ui/SelectionCopy.cs` |
+| 49 | Action icons follow the active theme immediately | `Ui/Controls/ActionIcons.cs` (`Glyph(..., string resourceKey)`), Prompt/Agent tab, `Ui/ResultWindow.cs` (`BuildActionBar`), `Ui/Styles.xaml` (`YuukaChipButton`) |
 
 ---
 
@@ -379,6 +382,29 @@ sequenceDiagram
     keeps the highlight painted after focus moves, and the scope only resets when the box *has* focus
     (`IsKeyboardFocusWithin`) or a new result arrives.
 
+33. **A hooked bar follows an anchor, not a screen coordinate** — `HookCandidate.AnchorX` is the bar's
+    left edge measured from the target's left edge, captured when the hook is made and re-taken when the
+    user drags the bar. `WindowTracker.Follow(window, …, anchorX)` recomputes the target from it on every
+    tick. Feeding the bar's own live left edge back in (what `TargetFor(…, barLeft)` does, and what the
+    hook used to do) pins the bar to one X while the window slides out from under it, so the bar only
+    ever moved vertically. The poll runs at 20 Hz; the spring supplies the smoothing.
+
+34. **A colour set from code must be a resource *reference*, never a captured `Brush`** —
+    `Theme.Apply` replaces the brush objects in a window's resources on every theme switch, so anything
+    that stored the instance (`(Brush)FindResource("YuukaText")` into a `Path.Stroke` or a
+    `Button.Background`) keeps the old palette until it is rebuilt. `SetResourceReference` and the
+    `ActionIcons.Glyph(key, size, "YuukaOnAccent")` overload re-resolve themselves, which is what makes
+    a theme switch repaint the action icons immediately. The same applies to template internals: a
+    control template that hard-codes a `{DynamicResource …}` background swallows every colour a caller
+    sets, so `YuukaChipButton` paints `{TemplateBinding Background}` and keeps its default in a Setter.
+
+35. **Conversation messages are read-only text boxes, not labels** — a `TextBox` is the only WPF text
+    element that selects by mouse, keeps the selection when focus moves on and copies on `Ctrl+C`, so
+    `ResultWindow.CreateMessageBox` builds one with border, caret, padding, tab stop and internal
+    scrollers switched off. It looks like the `TextBlock` it replaced (same font, size, alignment,
+    margin), and `SelectionCopy.Attach` gives it the floating copy button; the trackers are disposed
+    when the list is rebuilt.
+
 ---
 
 ## 8. Build / run / test
@@ -387,7 +413,7 @@ sequenceDiagram
 dotnet build YuukaOCR.slnx -c Release          # build the whole solution
 dotnet run --project src/YuukaOCR.App          # run the dev build
 dotnet run --project src/YuukaOCR.App -- --config   # open the settings window directly
-dotnet run --project tests/YuukaOCR.Tests      # 52 tests, no NuGet needed
+dotnet run --project tests/YuukaOCR.Tests      # 53 tests, no NuGet needed
 python tools/makeicon.py --check               # regenerate/verify the app icon
 YUUKA_API_DEBUG=1 dotnet run --project src/YuukaOCR.App   # writes user/api-debug.log (off by default)
 dotnet run --project tools/xamlcheck -c Release            # parses every XAML file + builds the bubble

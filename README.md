@@ -40,7 +40,7 @@ Architecture in detail: see [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md).
 ```powershell
 dotnet build YuukaOCR.slnx -c Release
 dotnet run --project src/YuukaOCR.App            # run the dev build
-dotnet run --project tests/YuukaOCR.Tests        # 52 tests
+dotnet run --project tests/YuukaOCR.Tests        # 53 tests
 pwsh ./build.ps1                                 # publish into publish/
 pwsh ./build.ps1 -SelfContained                  # bundle the runtime, no .NET install needed
 ```
@@ -121,8 +121,11 @@ To copy the app to another machine with nothing installed: `pwsh ./build.ps1 -Se
    and follows that window. *Settings → Hooking → Hook mode* switches between **Outside** (the bar sits
    just past the window edge) and **Inside** (it stays within the window, which is what a fullscreen
    app needs); the target is always clamped to the monitor, so the bar cannot end up off-screen.
-   Attaching **keeps the bar where you put it**: only the axis the hook owns is computed, the other one
-   is left alone, so a bar sitting at the right end of a window does not jump to the middle.
+   Attaching **keeps the bar where you put it**: the hook remembers the bar's *offset* from the window's
+   left edge, not a screen coordinate, so dragging the window sideways takes the bar with it and a bar
+   sitting at the right end of a window does not jump to the middle. Drag the bar itself while hooked
+   and the offset is re-taken where you drop it. The window is polled 20 times a second, so the bar
+   trails a window being dragged instead of being left behind.
 
 ### The result bubble
 
@@ -142,6 +145,11 @@ To copy the app to another machine with nothing installed: `pwsh ./build.ps1 -Se
 * Actions are predefined quick-chat turns: each one sends the global *Agent instruction* plus its own
   *Action instruction* plus the context, through the **same conversation** as the chat box, so "and
   in Vietnamese?" works right after "summarize this".
+* **The conversation is selectable too** — both your own messages and the agent's replies. Select any
+  part of a message and the same floating copy button appears; `Ctrl+C` works as well, and the highlight
+  stays painted (dimmed) when you click into the chat box, so a quote you picked is still visible while
+  you type the follow-up. The layout is unchanged: the small role label still sits above each message,
+  your turns stay right-aligned, and the panel scrolls as before.
 * The conversation is shared with every bubble and survives a restart (`chat_history` in
   `user/log.json`); *Settings → History → Chat history* shows it in order.
 * **Drag the action tabs** in *Settings → Prompt/Agent → Actions* to reorder them; the Action Bar in
@@ -242,6 +250,12 @@ independently (`frame_opacity` / `background_opacity`, 20–100%). They are stor
 `user/settings.json` as plain numbers, so the file stays readable and hand-editable. The shipped
 background opacity is **90 %** — applied only when the key is missing, so an existing value is never
 rewritten by an upgrade.
+
+**Every icon follows the theme, live.** The action buttons in the bubble, the action tab strip and its
+icon picker, the History row buttons and the floating copy button all take their ink from the theme's
+resources (`YuukaText`, `YuukaSubtle`, `YuukaOnAccent`) rather than from a colour captured when the
+button was built, so switching between a dark preset and **Daylight** recolours them immediately — no
+restart, no reopening the tab. The same rule paints the selected tab's accent fill.
 
 Every slider in the settings window is **discrete**: it snaps to fixed steps and prints the step
 values under the track, so a value is always a number you can name instead of a position you have to

@@ -28,7 +28,8 @@ public static class SelectionCopy
     {
         // Accent-filled, not a transparent icon: a popup has no surface of its own, so a transparent
         // button plus on-accent ink disappeared on a dark theme. The fill makes the contrast flip with
-        // the theme instead (dark ink on the light pastel accents, light ink on the dark ones).
+        // the theme instead (dark ink on the light pastel accents, light ink on the dark ones), and the
+        // glyph names the resource so it flips with it.
         var button = new Button
         {
             Width = 26,
@@ -36,7 +37,7 @@ public static class SelectionCopy
             Cursor = System.Windows.Input.Cursors.Hand,
             ToolTip = L.T("result.copySelection"),
             Style = box.TryFindResource("YuukaAccentIconButton") as Style,
-            Content = ActionIcons.Glyph("copy", 13, GlyphBrush(box))
+            Content = ActionIcons.Glyph("copy", 13, "YuukaOnAccent")
         };
 
         var popup = new Popup
@@ -197,12 +198,9 @@ public static class SelectionCopy
     }
 
     /// <summary>
-    /// The glyph colour: on-accent when the host paints the button with the accent (the result bubble),
-    /// plain text otherwise.
+    /// The glyph colour is the theme's on-accent ink: the copy button is accent-filled, so its ink has to
+    /// flip with the theme (dark on the light pastels, light on the dark ones).
     /// </summary>
-    private static Brush GlyphBrush(FrameworkElement host) =>
-        host.TryFindResource("YuukaOnAccent") as Brush ?? Brushes.White;
-
     private sealed class Unbinder(Action dispose) : IDisposable
     {
         public void Dispose() => dispose();

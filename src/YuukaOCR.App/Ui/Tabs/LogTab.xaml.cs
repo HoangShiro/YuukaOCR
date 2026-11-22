@@ -145,7 +145,7 @@ public partial class LogTab : UserControl
             Margin = new Thickness(4, 0, 0, 0),
             Style = (Style)FindResource("YuukaIconButton"),
             ToolTip = tooltip,
-            Content = ActionIcons.Glyph(icon, 12, (Brush)FindResource("YuukaSubtle"))
+            Content = ActionIcons.Glyph(icon, 12, "YuukaSubtle")
         };
 
         button.Click += (_, _) => onClick();

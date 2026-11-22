@@ -624,13 +624,19 @@
     <!-- A small text chip: the chat context toggle, browser-style tab labels, that sort of thing. -->
     <Style x:Key="YuukaChipButton" TargetType="Button">
         <Setter Property="Foreground" Value="{DynamicResource YuukaText}" />
+        <!--
+            The template paints {TemplateBinding Background}, so a caller can tint one chip (the selected
+            action tab uses the accent). The default lives here instead of inside the template, where it
+            used to swallow every Background a caller set.
+        -->
+        <Setter Property="Background" Value="{DynamicResource YuukaPanel}" />
         <Setter Property="FontFamily" Value="{DynamicResource YuukaFontFamily}" />
         <Setter Property="FontSize" Value="{DynamicResource YuukaFontSize}" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="Surface" CornerRadius="6" Padding="{TemplateBinding Padding}"
-                            Background="{DynamicResource YuukaPanel}"
+                            Background="{TemplateBinding Background}"
                             BorderBrush="{DynamicResource YuukaBorder}" BorderThickness="0">
                         <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="Center" />
                     </Border>
