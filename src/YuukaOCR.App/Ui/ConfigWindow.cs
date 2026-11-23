@@ -5,6 +5,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using YuukaOCR.App.Services;
 using YuukaOCR.App.Ui.Tabs;
+using YuukaOCR.Core.Settings;
 
 namespace YuukaOCR.App.Ui;
 
@@ -44,6 +45,16 @@ public partial class ConfigWindow : Window, IThemedWindow
         // Borderless window: draggable on both the title strip and the padding around the content,
         // but not when the click lands on a control (tab, button, text box, slider...).
         MouseLeftButtonDown += OnChromeMouseDown;
+
+        // Freely resizable from every corner and edge, on the card's own border, and the size the user
+        // leaves it at is the size it opens with next time.
+        WindowSizeMemory.Restore(this, _services, WindowSizeKeys.Settings);
+        ResizeGrips.Attach(this, Overlay, Chrome,
+            resized: () => WindowSizeMemory.Remember(_services, WindowSizeKeys.Settings, Width, Height));
+
+        // A text area only saves on LostFocus, and several controls here (icon buttons, chips, cards) are
+        // deliberately not focusable — clicking one must not throw away what was typed.
+        Closing += (_, _) => PromptPanel.CommitEdits();
 
         StatusPanel.Refresh();
         Tabs.SelectionChanged += (_, _) =>

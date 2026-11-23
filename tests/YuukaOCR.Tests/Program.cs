@@ -866,6 +866,264 @@ Test("GitHubUpdateService: the installer leaves user data alone", () =>
     True(quoted.Contains("'C:\\it''s\\a.zip'"), "single quotes are doubled");
 });
 
+// ---------------------------------------------------------------------- markdown
+static string Inlines(IReadOnlyList<YuukaOCR.Core.Markdown.MdInline> nodes)
+{
+    var text = "";
+    foreach (var node in nodes)
+    {
+        text += node switch
+        {
+            YuukaOCR.Core.Markdown.MdText run => run.Text,
+            YuukaOCR.Core.Markdown.MdCode code => $"`{code.Text}`",
+            YuukaOCR.Core.Markdown.MdEmphasis e =>
+                (e.Bold ? "*" : "") + (e.Italic ? "/" : "") + (e.Strike ? "~" : "") + "[" + Inlines(e.Children) + "]",
+            YuukaOCR.Core.Markdown.MdLink link => $"<{Inlines(link.Children)}|{link.Url}>",
+            YuukaOCR.Core.Markdown.MdImage image => $"!<{image.Alt}|{image.Url}>",
+            YuukaOCR.Core.Markdown.MdLineBreak => "\\n",
+            _ => "?"
+        };
+    }
+    return text;
+}
+
+Test("Markdown: headings, setext, rule and paragraph breaks", () =>
+{
+    var blocks = YuukaOCR.Core.Markdown.MarkdownParser.Parse(
+        "# One\n\n## Two ##\n\nTitle\n=====\n\nSub\n---\n\nfirst line\nsecond line\n\n***");
+
+    var headings = blocks.OfType<YuukaOCR.Core.Markdown.MdHeading>().ToList();
+    Equal(4, headings.Count, "four headings");
+    Equal(1, headings[0].Level, "level one");
+    Equal("One", Inlines(headings[0].Inlines), "trailing hashes are not part of the text");
+    Equal("Two", Inlines(headings[1].Inlines));
+    Equal("Title", Inlines(headings[2].Inlines), "setext level 1");
+    Equal(2, headings[3].Level, "setext level 2");
+
+    var paragraph = blocks.OfType<YuukaOCR.Core.Markdown.MdParagraph>().First();
+    Equal("first line\\nsecond line", Inlines(paragraph.Inlines), "a single newline is a line break");
+    True(blocks.OfType<YuukaOCR.Core.Markdown.MdRule>().Any(), "*** is a rule");
+});
+
+Test("Markdown: emphasis, code spans, escapes and non-emphasis", () =>
+{
+    var nodes = YuukaOCR.Core.Markdown.MarkdownParser.ParseInlines(
+        "**bold** *it* ***both*** ~~gone~~ `a|b` snake_case_name 2 * 3 * 4 \\*literal\\*");
+
+    Equal("*[bold] /[it] */[both] ~[gone] `a|b` snake_case_name 2 * 3 * 4 *literal*", Inlines(nodes));
+});
+
+Test("Markdown: links, autolinks and images", () =>
+{
+    var nodes = YuukaOCR.Core.Markdown.MarkdownParser.ParseInlines(
+        "see [the docs](https://example.com/a_b \"title\") and <https://example.org> ![alt text](img.png)");
+
+    Equal("see <the docs|https://example.com/a_b> and <https://example.org|https://example.org> !<alt text|img.png>",
+        Inlines(nodes));
+});
+
+Test("Markdown: ordered, unordered, nested and task lists", () =>
+{
+    var blocks = YuukaOCR.Core.Markdown.MarkdownParser.Parse(
+        "3. three\n4. four\n   - nested\n   - [x] done\n   - [ ] todo");
+
+    var list = blocks.OfType<YuukaOCR.Core.Markdown.MdList>().Single();
+    True(list.Ordered, "ordered");
+    Equal(3, list.Start, "starts at 3");
+    Equal(2, list.Items.Count, "two top-level items");
+
+    var nested = list.Items[1].Blocks.OfType<YuukaOCR.Core.Markdown.MdList>().Single();
+    Equal(3, nested.Items.Count, "three nested items");
+    Equal(true, nested.Items[1].Task, "a checked box is true");
+    Equal(false, nested.Items[2].Task, "an unchecked box is false");
+});
+
+Test("Markdown: a GFM table keeps its alignment and cells", () =>
+{
+    var blocks = YuukaOCR.Core.Markdown.MarkdownParser.Parse(
+        "| Name | Qty | Note |\n|:-----|----:|:----:|\n| ink  | 3   | a \\| b |\n| pen  | 12  | ok |");
+
+    var table = blocks.OfType<YuukaOCR.Core.Markdown.MdTable>().Single();
+    Equal(3, table.Aligns.Count, "three columns");
+    Equal(YuukaOCR.Core.Markdown.MdAlign.Left, table.Aligns[0]);
+    Equal(YuukaOCR.Core.Markdown.MdAlign.Right, table.Aligns[1]);
+    Equal(YuukaOCR.Core.Markdown.MdAlign.Center, table.Aligns[2]);
+
+    Equal(3, table.Rows.Count, "header plus two rows");
+    True(table.Rows[0].Header, "first row is the header");
+    Equal("Qty", Inlines(table.Rows[0].Cells[1]), "header cell");
+    Equal("a | b", Inlines(table.Rows[1].Cells[2]), "an escaped pipe stays in the cell");
+});
+
+Test("Markdown: fenced code, quote and indented code", () =>
+{
+    var blocks = YuukaOCR.Core.Markdown.MarkdownParser.Parse(
+        "```csharp\nvar x = 1;\n\nvar y = 2;\n```\n\n> quoted **text**\n> more\n\n    indented\n    code");
+
+    var code = blocks.OfType<YuukaOCR.Core.Markdown.MdCodeBlock>().ToList();
+    Equal(2, code.Count, "two code blocks");
+    Equal("csharp", code[0].Language, "info string");
+    Equal("var x = 1;\n\nvar y = 2;", code[0].Text, "blank line inside the fence survives");
+    Equal("indented\ncode", code[1].Text, "four-space code");
+
+    var quote = blocks.OfType<YuukaOCR.Core.Markdown.MdQuote>().Single();
+    var quoteParagraph = quote.Blocks.OfType<YuukaOCR.Core.Markdown.MdParagraph>().Single();
+    Equal("quoted *[text]\\nmore", Inlines(quoteParagraph.Inlines));
+});
+
+Test("GitHubUpdateService: a moving release tag falls back to the name and the package", () =>
+{
+    using var log = new LogService(Path.Combine(Path.GetTempPath(), "yuukaocr-test-log.json"));
+    using var updater = new GitHubUpdateService(log, "2.1.0");
+
+    // The shape this repository actually publishes: one moving tag ("Windows"), the version in the
+    // release name and in the package file name. Reading only tag_name failed with
+    // "The release tag could not be read: Windows" on every single check.
+    var moving = updater.Interpret("""
+    {
+      "tag_name": "Windows",
+      "name": "YuukaOCR v2.2",
+      "assets": [
+        { "name": "YuukaOCR.v2.2.zip", "browser_download_url": "https://example.invalid/v2.2.zip", "size": 802000 },
+        { "name": "Source code (zip)", "browser_download_url": "https://example.invalid/src.zip", "size": 900000 }
+      ]
+    }
+    """);
+
+    True(moving.Completed, "a non-numeric tag is not the end of the world");
+    Equal("2.2.0", moving.LatestVersion, "the version comes from the name or the package");
+    True(moving.UpdateAvailable, "2.2 is newer than 2.1");
+    True(moving.CanInstall, "and the package is there");
+    Equal("YuukaOCR.v2.2.zip", moving.Asset!.Name, "the app package, not the sources");
+
+    // Nothing numeric anywhere: the message must still name what it saw.
+    var nothing = updater.Interpret("{\"tag_name\":\"Windows\",\"name\":\"Windows\",\"assets\":[]}");
+    Equal(GitHubUpdateService.KeyBadTag, nothing.MessageKey, "still refused");
+    Equal("Windows", nothing.MessageArg, "and the label is quoted back");
+
+    True(GitHubUpdateService.TryExtractVersion("YuukaOCR v2.2", out var fromName), "name form");
+    Equal("2.2.0", fromName.ToString(), "v2.2 renders as 2.2.0");
+    True(GitHubUpdateService.TryExtractVersion("YuukaOCR.v2.2.zip", out var fromFile), "file form");
+    Equal("2.2.0", fromFile.ToString(), "v2.2 in a file name");
+    True(GitHubUpdateService.TryExtractVersion("YuukaOCR-2.2.0-win-x64.zip", out var fromPackage), "package form");
+    Equal("2.2.0", fromPackage.ToString(), "2.2.0");
+
+    True(!GitHubUpdateService.TryExtractVersion("Windows 11 build 5", out _),
+        "a label with no dotted number is not a version");
+    True(!GitHubUpdateService.TryExtractVersion("Windows", out _), "a bare word is not a version");
+});
+
+// --------------------------------------------------------------- window sizing
+Test("ResizeMath: an edge moves only the side that is dragged", () =>
+{
+    var start = new YuukaOCR.Core.Ui.WindowRect(100, 100, 400, 300);
+
+    var wider = YuukaOCR.Core.Ui.ResizeMath.Drag(YuukaOCR.Core.Ui.ResizeEdge.Right, start, 60, 0, 200, 120);
+    Equal(100d, wider.Left, "the left edge stays");
+    Equal(460d, wider.Width, "the right edge follows the pointer");
+    Equal(300d, wider.Height, "height untouched");
+
+    // Dragging the left edge leftwards grows the window and moves it, keeping the right edge fixed.
+    var leftward = YuukaOCR.Core.Ui.ResizeMath.Drag(YuukaOCR.Core.Ui.ResizeEdge.Left, start, -50, 0, 200, 120);
+    Equal(50d, leftward.Left, "the window moves with the edge");
+    Equal(450d, leftward.Width, "and grows by the same amount");
+    Equal(start.Right, leftward.Right, "the right edge does not move");
+
+    // Dragging past the minimum stops at the minimum, with the opposite edge still anchored.
+    var crushed = YuukaOCR.Core.Ui.ResizeMath.Drag(YuukaOCR.Core.Ui.ResizeEdge.Left, start, 900, 0, 200, 120);
+    Equal(200d, crushed.Width, "never narrower than the minimum");
+    Equal(start.Right, crushed.Right, "the right edge is still where it was");
+
+    var taller = YuukaOCR.Core.Ui.ResizeMath.Drag(YuukaOCR.Core.Ui.ResizeEdge.Top, start, 0, -40, 200, 120);
+    Equal(60d, taller.Top, "the top edge follows the pointer");
+    Equal(340d, taller.Height, "and the window grows downwards");
+});
+
+Test("ResizeMath: a corner drags both sides at once", () =>
+{
+    var start = new YuukaOCR.Core.Ui.WindowRect(100, 100, 400, 300);
+
+    var corner = YuukaOCR.Core.Ui.ResizeMath.Drag(YuukaOCR.Core.Ui.ResizeEdge.BottomRight, start, 25, 35, 200, 120);
+    Equal(425d, corner.Width, "width follows x");
+    Equal(335d, corner.Height, "height follows y");
+    Equal(100d, corner.Left, "the far corner is anchored");
+    Equal(100d, corner.Top, "the far corner is anchored");
+
+    var topLeft = YuukaOCR.Core.Ui.ResizeMath.Drag(YuukaOCR.Core.Ui.ResizeEdge.TopLeft, start, -20, -10, 200, 120);
+    Equal(80d, topLeft.Left, "x moves");
+    Equal(90d, topLeft.Top, "y moves");
+    Equal(420d, topLeft.Width, "and both sides grow");
+    Equal(310d, topLeft.Height, "and both sides grow");
+    Equal(start.Right, topLeft.Right, "bottom-right corner stays put");
+    Equal(start.Bottom, topLeft.Bottom, "bottom-right corner stays put");
+
+    var squeezed = YuukaOCR.Core.Ui.ResizeMath.Drag(YuukaOCR.Core.Ui.ResizeEdge.TopLeft, start, 5000, 5000, 200, 120);
+    Equal(200d, squeezed.Width, "clamped to the minimum width");
+    Equal(120d, squeezed.Height, "clamped to the minimum height");
+    Equal(start.Right, squeezed.Right, "right edge anchored");
+    Equal(start.Bottom, squeezed.Bottom, "bottom edge anchored");
+});
+
+Test("ResizeMath: a remembered size is fitted into the work area", () =>
+{
+    // A size from a monitor that is gone: wider than the screen and hanging off the right side.
+    var fitted = YuukaOCR.Core.Ui.ResizeMath.Fit(
+        new YuukaOCR.Core.Ui.WindowRect(3000, -200, 5000, 4000), 0, 0, 1920, 1080, 480, 360);
+
+    True(fitted.Width <= 1920, "no wider than the work area");
+    True(fitted.Height <= 1080, "no taller than the work area");
+    True(fitted.Right <= 1920, "fully on screen");
+    True(fitted.Bottom <= 1080, "fully on screen");
+
+    var small = YuukaOCR.Core.Ui.ResizeMath.Fit(
+        new YuukaOCR.Core.Ui.WindowRect(10, 10, 50, 20), 0, 0, 1920, 1080, 480, 360);
+    Equal(480d, small.Width, "a size below the minimum is raised to it");
+    Equal(360d, small.Height, "a size below the minimum is raised to it");
+});
+
+Test("Settings: window sizes round-trip and impossible values are dropped", () =>
+{
+    var settings = new AppSettings();
+    settings.WindowSizes["settings"] = new WindowSize(1100, 800);
+    settings.WindowSizes["result"] = new WindowSize(700, 420);
+    settings.WindowSizes["broken"] = new WindowSize(0, -5);
+    settings.WindowSizes["absurd"] = new WindowSize(500000, 500000);
+
+    var json = JsonSerializer.Serialize(settings, YuukaOCR.Core.Json.Options);
+    True(json.Contains("\"window_sizes\""), "the key is written with the legacy snake_case name");
+
+    var loaded = JsonSerializer.Deserialize<AppSettings>(json, YuukaOCR.Core.Json.Options)!;
+    loaded.Normalize();
+
+    Equal(1100d, loaded.SizeOf("settings")!.Width, "the settings size survives");
+    Equal(420d, loaded.SizeOf("result")!.Height, "the bubble size survives");
+    True(loaded.SizeOf("broken") is null, "a zero/negative size is dropped, not restored");
+    Equal(WindowSizeKeys.MaxSide, loaded.SizeOf("absurd")!.Width, "an absurd size is clamped, not restored");
+
+    var fresh = new AppSettings();
+    True(fresh.SizeOf("settings") is null, "a fresh profile has no remembered size");
+});
+
+Test("Settings: the bubble width follows the configured minimum", () =>
+{
+    // The rule the result window applies: the widest line of the text, raised to the configured minimum
+    // and capped at the natural width. 22 is the shadow padding per side, 44 the card's own inset.
+    static double WidthFor(int minimum, double textWidth, double scale = 1.0)
+    {
+        var pad = 22.0;
+        var natural = 620 * scale + pad * 2;
+        var min = Math.Max(120, minimum * scale) + pad * 2;
+        var preferred = textWidth + pad * 2 + 44;
+        return Math.Clamp(preferred, min, Math.Max(min, natural));
+    }
+
+    Equal(244d, WidthFor(200, 20), "short text sits on the minimum");
+    Equal(644d, WidthFor(600, 20), "a higher minimum makes the same text wider");
+    Equal(664d, WidthFor(200, 2000), "a long line is capped at the natural width");
+    Equal(464d, WidthFor(200, 376), "text wider than the minimum sets the width");
+    Equal(164d, WidthFor(120, 20), "the slider's low end is honoured");
+});
+
 // ---------------------------------------------------------------------- run all
 var failed = 0;
 foreach (var (name, body) in tests)

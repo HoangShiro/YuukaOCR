@@ -13,6 +13,7 @@ using YuukaOCR.Core.Interop;
 using YuukaOCR.Core.Localization;
 using YuukaOCR.Core.Physics;
 using YuukaOCR.Core.Settings;
+using YuukaOCR.Core.Ui;
 
 namespace YuukaOCR.App.Ui;
 
@@ -66,6 +67,24 @@ public partial class ResultWindow : Window, IThemedWindow
     private bool _placeholderShown = true;
 
     /// <summary>
+    /// The result exactly as it arrived. The document on screen is a *rendering* of this (Markdown
+    /// headings, tables, links), so anything that has to hand the text on — copy-all, the agent's
+    /// context — reads this instead of the FlowDocument, which would give back plain text with the
+    /// structure flattened away.
+    /// </summary>
+    private string _rawText = "";
+
+    /// <summary>Font size the document was last built for, so a theme switch rebuilds it only if needed.</summary>
+    private double _renderedFontSize;
+
+    /// <summary>
+    /// True once the user has dragged the bubble to a size of their own. Until then it sizes itself to
+    /// its content (SizeToContent=Height) at the configured minimum width; afterwards that size is
+    /// restored every time the bubble is shown.
+    /// </summary>
+    private bool _userSized;
+
+    /// <summary>
     /// Identity of the action set currently drawn in the bar. <see cref="ApplyAppearance"/> fires on
     /// every settings change, so the bar is only rebuilt when an action was added, removed or edited —
     /// not on every pixel of a slider drag.
@@ -110,8 +129,47 @@ public partial class ResultWindow : Window, IThemedWindow
         ApplyLocalization();
         AppearanceSync.Register(this);
 
+        // Restore the size the user dragged out last time, then let them drag it again.
+        if (WindowSizeMemory.Restore(this, _services, WindowSizeKeys.Result))
+        {
+            _userSized = true;
+            SizeToContent = SizeToContent.Manual;
+        }
+
+        ResizeGrips.Attach(this, Overlay, Root, BeginResize, EndResize);
+
         HeaderRow.LostMouseCapture += (_, _) => EndDrag();
         _animTimer.Tick += (_, _) => OnRendering();
+    }
+
+    /// <summary>
+    /// First frame of a resize drag. The bubble sizes itself to its content until this moment, and
+    /// <see cref="SizeToContent"/> would fight every height the user drags — so it is switched off here,
+    /// once, and the current rectangle becomes the starting point of the drag.
+    /// </summary>
+    private WindowRect? BeginResize()
+    {
+        if (!_userSized)
+        {
+            var rect = new WindowRect(Left, Top, ActualWidth, ActualHeight);
+
+            SizeToContent = SizeToContent.Manual;
+            Width = rect.Width;
+            Height = rect.Height;
+            _userSized = true;
+
+            // A fixed window scrolls its text instead of clipping it.
+            ResultBox.MaxHeight = double.PositiveInfinity;
+            return rect;
+        }
+
+        return new WindowRect(Left, Top, Width, Height);
+    }
+
+    private void EndResize()
+    {
+        if (!_userSized) return;
+        WindowSizeMemory.Remember(_services, WindowSizeKeys.Result, Width, Height);
     }
 
     // ------------------------------------------------------------- appearance
@@ -132,8 +190,17 @@ public partial class ResultWindow : Window, IThemedWindow
         ResultBox.FontSize = theme.FontSize;
 
         // +2*padding so the *visible* width still matches the configured value.
+        //
+        // Width is set explicitly instead of being left to the content: a borderless Window that sizes
+        // itself to its height keeps the OS default width for the other axis, which is then clamped by
+        // MaxWidth — so the bubble always came out 620 wide and the Minimum Width slider did nothing.
+        // The natural width is the ceiling of "as wide as this content wants", the slider raises the
+        // floor, and a size the user dragged out wins over both.
+        var natural = 620 * scale + ShadowPad * 2;
         MinWidth = Math.Max(120, settings.MinSubWindowWidth * scale) + ShadowPad * 2;
-        MaxWidth = Math.Max(MinWidth + 40, 620 * scale + ShadowPad * 2);
+        MaxWidth = Math.Max(natural, 1800 * scale);
+
+        FitWidth();
 
         // The action bar scales with the UI scale, so a 150 % bar does not get a 100 % action bar.
         ChatBox.FontSize = Math.Max(10, 11 * scale);
@@ -146,6 +213,10 @@ public partial class ResultWindow : Window, IThemedWindow
 
         foreach (var button in ActionBar.Children.OfType<Button>())
             button.Width = button.Height = Math.Round(26 * scale);
+
+        // Heading sizes are computed from the body size, so a font-size change means a rebuild. A theme
+        // change alone does not: every brush in the document is a resource reference.
+        if (Math.Abs(_renderedFontSize - theme.FontSize) > 0.01) RenderText();
 
         RenderConversation();
     }
@@ -176,7 +247,7 @@ public partial class ResultWindow : Window, IThemedWindow
     public void ShowText(string text, ScreenRect? barBounds, bool activate = true)
     {
         ApplyAppearance();
-        ResultBox.Text = text;
+        SetResultText(text);
 
         // A new result starts a fresh scope, but the conversation itself is shared and persistent.
         _useSelection = false;
@@ -306,6 +377,78 @@ public partial class ResultWindow : Window, IThemedWindow
 
     // ------------------------------------------------------------- selection
 
+    /// <summary>The raw result text, as it arrived — what copy-all and the agent's context use.</summary>
+    internal string ResultText => _rawText;
+
+    /// <summary>Stores the result and renders it. The document is a Markdown view of the text.</summary>
+    private void SetResultText(string? text)
+    {
+        _rawText = text ?? "";
+        RenderText();
+        FitWidth();
+    }
+
+    /// <summary>
+    /// Chooses the bubble's width from the text: as wide as the longest line needs, never narrower than
+    /// the configured minimum, never wider than the natural width.
+    ///
+    /// This is what makes *Layout → Minimum width* do something. Before, the window was 620 wide no
+    /// matter what the setting said (a borderless window that sizes itself to its height keeps the OS
+    /// default width for the other axis), so dragging the slider 120…600 changed nothing at all.
+    /// </summary>
+    private void FitWidth()
+    {
+        if (_userSized) return;
+
+        var scale = Math.Clamp(_services.Settings.Settings.UiScale, 50, 200) / 100.0;
+        var natural = 620 * scale + ShadowPad * 2;
+
+        Width = Math.Clamp(PreferredWidth(), MinWidth, Math.Max(MinWidth, natural));
+    }
+
+    /// <summary>
+    /// The width the text would like: the widest line measured in the theme's own font. Measuring the
+    /// text instead of the laid-out tree is deliberate — the tree is measured with a star column, so it
+    /// would always report the width it was given, which is exactly the bug being fixed.
+    /// </summary>
+    private double PreferredWidth()
+    {
+        var theme = _services.Settings.Settings.Theme;
+        var typeface = new Typeface(new FontFamily(theme.FontFamily), FontStyles.Normal,
+            FontWeights.Normal, FontStretches.Normal);
+        var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+
+        var widest = 0.0;
+        foreach (var line in _rawText.Split('\n'))
+        {
+            var trimmed = line.TrimEnd();   // drops the CR of a CRLF split as well
+            if (trimmed.Length == 0) continue;
+
+            var text = new FormattedText(trimmed, System.Globalization.CultureInfo.CurrentCulture,
+                FlowDirection.LeftToRight, typeface, theme.FontSize, Brushes.Black, dpi);
+
+            widest = Math.Max(widest, text.WidthIncludingTrailingWhitespace);
+        }
+
+        // Shadow padding on both sides, plus the card's own inset and the close/copy rail.
+        return widest + ShadowPad * 2 + 44;
+    }
+
+    /// <summary>
+    /// Rebuilds the document from <see cref="_rawText"/>. Cheap enough to do on a font-size change, and
+    /// deliberately not done per repaint: a slider drag fires <see cref="ApplyAppearance"/> constantly.
+    /// </summary>
+    private void RenderText()
+    {
+        var fontSize = _services.Settings.Settings.Theme.FontSize;
+        _renderedFontSize = fontSize;
+
+        ResultBox.Document = MarkdownView.Build(_rawText, fontSize);
+
+        // A document swap leaves a stale selection and its popup behind.
+        SelectionPopup.IsOpen = false;
+    }
+
     /// <summary>
     /// Places the floating copy button under the end of the selection, or hides it when nothing is
     /// selected. The popup is positioned in the TextBox's own coordinate space, so it follows a
@@ -313,7 +456,7 @@ public partial class ResultWindow : Window, IThemedWindow
     /// </summary>
     private void OnSelectionChanged(object sender, RoutedEventArgs e)
     {
-        if (ResultBox.SelectionLength <= 0)
+        if (!SelectionCopy.HasSelection(ResultBox))
         {
             SelectionPopup.IsOpen = false;
 
@@ -329,7 +472,7 @@ public partial class ResultWindow : Window, IThemedWindow
             return;
         }
 
-        var end = ResultBox.GetRectFromCharacterIndex(ResultBox.SelectionStart + ResultBox.SelectionLength, true);
+        var end = SelectionCopy.SelectionEndRect(ResultBox);
         if (end.IsEmpty)
         {
             SelectionPopup.IsOpen = false;
@@ -343,7 +486,7 @@ public partial class ResultWindow : Window, IThemedWindow
         // A selection is a statement of intent: the next message is about it. Pin the text now, so the
         // question can be typed in the chat box without the context depending on the highlight still
         // being there when Enter is pressed.
-        _pinnedSelection = ResultBox.SelectedText;
+        _pinnedSelection = SelectionCopy.SelectedText(ResultBox);
         if (!_useSelection)
         {
             _useSelection = true;
@@ -353,7 +496,7 @@ public partial class ResultWindow : Window, IThemedWindow
 
     private void OnCopySelectionClick(object sender, RoutedEventArgs e)
     {
-        var text = ResultBox.SelectedText;
+        var text = SelectionCopy.SelectedText(ResultBox);
         if (string.IsNullOrEmpty(text)) return;
 
         if (ClipboardWriter.SetText(text))
@@ -366,8 +509,8 @@ public partial class ResultWindow : Window, IThemedWindow
 
     private void OnCopyAllClick(object sender, RoutedEventArgs e)
     {
-        if (string.IsNullOrEmpty(ResultBox.Text)) return;
-        if (ClipboardWriter.SetText(ResultBox.Text))
+        if (string.IsNullOrEmpty(_rawText)) return;
+        if (ClipboardWriter.SetText(_rawText))
         {
             _services.Clipboard.SuppressNext();
             ShowHint(L.T("common.copied"));
@@ -383,8 +526,8 @@ public partial class ResultWindow : Window, IThemedWindow
 
     private void OnScopeClick(object sender, RoutedEventArgs e)
     {
-        _useSelection = !_useSelection && ResultBox.SelectionLength > 0;
-        if (_useSelection) _pinnedSelection = ResultBox.SelectedText;
+        _useSelection = !_useSelection && SelectionCopy.HasSelection(ResultBox);
+        if (_useSelection) _pinnedSelection = SelectionCopy.SelectedText(ResultBox);
         ScopeText.Text = L.T(_useSelection ? "result.context.selection" : "result.context.all");
     }
 
@@ -522,7 +665,7 @@ public partial class ResultWindow : Window, IThemedWindow
         if (_useSelection && !string.IsNullOrWhiteSpace(_pinnedSelection))
             return (_pinnedSelection, L.T("result.context.selection"));
 
-        var whole = ResultBox.Text;
+        var whole = _rawText;
         return string.IsNullOrWhiteSpace(whole)
             ? (null, L.T("result.context.all"))
             : (whole, L.T("result.context.all"));
@@ -608,15 +751,23 @@ public partial class ResultWindow : Window, IThemedWindow
     }
 
     /// <summary>
-    /// One message body: a read-only <see cref="TextBox"/> that looks exactly like the label it replaced.
+    /// One message body. Your own turns are a read-only <see cref="TextBox"/> that looks exactly like the
+    /// label it replaced; the agent's replies are a read-only <see cref="RichTextBox"/> showing the same
+    /// Markdown rendering as the OCR text, because a model answers in Markdown and showing the source of
+    /// a table or a code block is not an answer.
     ///
-    /// A TextBox rather than a TextBlock because the user has to be able to select and copy what was said,
-    /// and a TextBox is the only WPF text element that selects by mouse, keeps the selection when the
-    /// focus moves on and copies on Ctrl+C without extra code. Everything that would make it look like an
-    /// input field — border, caret, background, padding, scrollbars — is switched off here, so the
-    /// conversation keeps the layout and rhythm it had.
+    /// Both types select by mouse, keep the selection when the focus moves on and copy on Ctrl+C; a
+    /// <see cref="TextBlock"/> does none of that, which is why the transcript is not made of labels.
+    /// Everything that would make them look like input fields — border, caret, background, padding,
+    /// scrollbars — is switched off, so the conversation keeps the layout and rhythm it had.
     /// </summary>
-    internal static TextBox CreateMessageBox(string text, bool isUser, double fontSize)
+    internal static TextBoxBase CreateMessageBox(string text, bool isUser, double fontSize) =>
+        isUser ? PlainMessage(text, fontSize) : MarkdownMessage(text, fontSize);
+
+    /// <summary>
+    /// A user turn: literal text, never parsed. Typing <c>*</c> or <c>#</c> must stay what was typed.
+    /// </summary>
+    private static TextBox PlainMessage(string text, double fontSize)
     {
         var box = new TextBox
         {
@@ -630,8 +781,8 @@ public partial class ResultWindow : Window, IThemedWindow
             Padding = new Thickness(0),
             Cursor = Cursors.IBeam,
             FontSize = fontSize,
-            HorizontalAlignment = isUser ? HorizontalAlignment.Right : HorizontalAlignment.Left,
-            TextAlignment = isUser ? TextAlignment.Right : TextAlignment.Left,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            TextAlignment = TextAlignment.Right,
             Margin = new Thickness(0, 0, 0, 2),
 
             // The selection is the point of the box: keep it painted once the focus moves to the chat box
@@ -639,17 +790,52 @@ public partial class ResultWindow : Window, IThemedWindow
             IsInactiveSelectionHighlightEnabled = true
         };
 
-        // Theme brushes are re-created on every theme switch, so they are referenced, not copied: a
-        // captured Brush instance would keep the old colour until the bubble was rebuilt.
+        Dress(box);
+        return box;
+    }
+
+    /// <summary>
+    /// An agent reply: the Markdown document, left aligned, growing to its own height. The text stays real
+    /// selectable text, so the floating copy button works on a table cell exactly like on a sentence.
+    /// </summary>
+    private static RichTextBox MarkdownMessage(string text, double fontSize)
+    {
+        var box = new RichTextBox
+        {
+            Document = MarkdownView.Build(text, fontSize),
+            IsReadOnly = true,
+            IsReadOnlyCaretVisible = false,
+            IsTabStop = false,
+            BorderThickness = new Thickness(0),
+            Background = Brushes.Transparent,
+            Padding = new Thickness(0),
+            Cursor = Cursors.IBeam,
+            FontSize = fontSize,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(0, 0, 0, 2),
+
+            // A link in a reply opens in the browser — MarkdownView only ever sets an http/https target.
+            IsDocumentEnabled = true,
+            IsInactiveSelectionHighlightEnabled = true
+        };
+
+        Dress(box);
+        return box;
+    }
+
+    /// <summary>
+    /// The look both message bodies share: theme ink and font by *reference* (a captured brush would keep
+    /// the old palette after a theme switch), and internal scrolling disabled so the message measures to
+    /// its own content instead of a default box height — which is also what makes a RichTextBox grow.
+    /// </summary>
+    private static void Dress(TextBoxBase box)
+    {
         box.SetResourceReference(Control.ForegroundProperty, "YuukaText");
         box.SetResourceReference(Control.FontFamilyProperty, "YuukaFontFamily");
         box.SetResourceReference(TextBoxBase.SelectionBrushProperty, "YuukaAccent");
-        // A disabled internal scroller: the message wraps to its own height, so there is nothing to scroll
-        // and the wheel keeps reaching the conversation's ScrollViewer.
+
         box.SetValue(ScrollViewer.VerticalScrollBarVisibilityProperty, ScrollBarVisibility.Disabled);
         box.SetValue(ScrollViewer.HorizontalScrollBarVisibilityProperty, ScrollBarVisibility.Disabled);
-
-        return box;
     }
 
     private void ClearConversation()

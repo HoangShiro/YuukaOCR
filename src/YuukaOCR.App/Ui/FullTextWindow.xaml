@@ -5,12 +5,17 @@
         Title="{ui:Tr fulltext.title}"
         Icon="pack://application:,,,/YuukaOCR;component/Assets/app-icon.png"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
-        WindowStartupLocation="Manual" ShowInTaskbar="False" ResizeMode="NoResize"
+        WindowStartupLocation="Manual" ShowInTaskbar="False" ResizeMode="CanResize"
+        Topmost="True" MinWidth="480" MinHeight="360"
         SnapsToDevicePixels="True" UseLayoutRounding="True">
 
-    <!-- Same shadow pad as the result bubble: the DropShadowEffect needs room or it is clipped. -->
+    <!--
+        Same shadow pad as the settings window (30), so matching that window's rectangle also matches its
+        visible card. Overlay carries the resize handles, added in code along the card's edge.
+    -->
+    <Grid x:Name="Overlay">
     <Border x:Name="Chrome" CornerRadius="12" Background="{DynamicResource YuukaBg}"
-            BorderBrush="{DynamicResource YuukaBorder}" BorderThickness="1" Margin="22">
+            BorderBrush="{DynamicResource YuukaBorder}" BorderThickness="1" Margin="30">
         <Border.Effect>
             <DropShadowEffect BlurRadius="24" ShadowDepth="4" Opacity="0.5" Color="Black" />
         </Border.Effect>
@@ -79,4 +84,5 @@
             </Grid>
         </Grid>
     </Border>
+    </Grid>
 </Window>

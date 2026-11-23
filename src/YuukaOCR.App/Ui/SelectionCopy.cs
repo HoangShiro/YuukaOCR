@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Media3D;
@@ -12,7 +13,9 @@ using YuukaOCR.Core.Localization;
 namespace YuukaOCR.App.Ui;
 
 /// <summary>
-/// Adds the "select text → a small copy button appears next to it" behaviour to any <see cref="TextBox"/>.
+/// Adds the "select text → a small copy button appears next to it" behaviour to any
+/// <see cref="TextBoxBase"/> — a plain TextBox (History rows, chat messages) or a RichTextBox (the
+/// Markdown result).
 ///
 /// One implementation, used by the result bubble and by every History row: the button is a <see cref="Popup"/>
 /// anchored to the selection's last character, so it follows the text when the box scrolls instead of
@@ -24,7 +27,7 @@ public static class SelectionCopy
     /// Attaches the floating copy button. <paramref name="onCopied"/> runs after the clipboard was
     /// written, so the caller can suppress its own clipboard watcher and show a hint.
     /// </summary>
-    public static IDisposable Attach(TextBox box, Action? onCopied = null)
+    public static IDisposable Attach(TextBoxBase box, Action? onCopied = null)
     {
         // Accent-filled, not a transparent icon: a popup has no surface of its own, so a transparent
         // button plus on-accent ink disappeared on a dark theme. The fill makes the contrast flip with
@@ -53,13 +56,13 @@ public static class SelectionCopy
 
         void OnSelectionChanged(object sender, RoutedEventArgs e)
         {
-            if (box.SelectionLength <= 0)
+            if (SelectedText(box).Length == 0)
             {
                 popup.IsOpen = false;
                 return;
             }
 
-            var end = box.GetRectFromCharacterIndex(box.SelectionStart + box.SelectionLength, true);
+            var end = SelectionEndRect(box);
             if (end.IsEmpty)
             {
                 popup.IsOpen = false;
@@ -73,7 +76,7 @@ public static class SelectionCopy
 
         void OnCopy(object sender, RoutedEventArgs e)
         {
-            var text = box.SelectedText;
+            var text = SelectedText(box);
             if (string.IsNullOrEmpty(text)) return;
             if (!ClipboardWriter.SetText(text)) return;
 
@@ -104,7 +107,7 @@ public static class SelectionCopy
     /// outside click takes the mouse capture, and with it the very drag that creates the selection. So
     /// the "the user moved on" conditions are spelled out instead of being inherited from the popup.
     /// </summary>
-    public static IDisposable Track(TextBox box, Popup popup)
+    public static IDisposable Track(TextBoxBase box, Popup popup)
     {
         void Hide()
         {
@@ -180,6 +183,39 @@ public static class SelectionCopy
             Detach();
         });
     }
+
+    /// <summary>
+    /// The selected text of either kind of box. A RichTextBox has no <c>SelectedText</c>, and asking the
+    /// document is the only way to get it that works for both.
+    /// </summary>
+    internal static string SelectedText(TextBoxBase box) => box switch
+    {
+        TextBox text => text.SelectedText,
+        RichTextBox rich => rich.Selection.Text,
+        _ => ""
+    };
+
+    /// <summary>
+    /// Where the selection ends, in the box's own coordinate space. A TextBox answers per character
+    /// index; a RichTextBox answers per text pointer, which is also the only way to find the line it is
+    /// on when the document has tables and lists in it.
+    /// </summary>
+    internal static Rect SelectionEndRect(TextBoxBase box) => box switch
+    {
+        TextBox text => text.GetRectFromCharacterIndex(text.SelectionStart + text.SelectionLength, true),
+        RichTextBox rich => rich.Selection.IsEmpty
+            ? Rect.Empty
+            : rich.Selection.End.GetCharacterRect(LogicalDirection.Forward),
+        _ => Rect.Empty
+    };
+
+    /// <summary>True when the box has something selected.</summary>
+    internal static bool HasSelection(TextBoxBase box) => box switch
+    {
+        TextBox text => text.SelectionLength > 0,
+        RichTextBox rich => !rich.Selection.IsEmpty,
+        _ => false
+    };
 
     /// <summary>True when <paramref name="node"/> is <paramref name="ancestor"/> or lives inside it.</summary>
     private static bool IsInside(DependencyObject? node, DependencyObject ancestor)

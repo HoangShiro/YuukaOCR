@@ -7,9 +7,15 @@
         Icon="pack://application:,,,/YuukaOCR;component/Assets/app-icon.png"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         WindowStartupLocation="CenterScreen" ShowInTaskbar="True" ResizeMode="CanResize"
+        Topmost="True"
         MinWidth="820" MinHeight="580" SnapsToDevicePixels="True" UseLayoutRounding="True">
 
-    <!-- Margin 30 = room for the DropShadowEffect (blur 24 + depth 4); without it the shadow is clipped at all four corners. -->
+    <!--
+        Overlay wraps the card so the resize handles (added in code, along the card's edge) can sit on
+        top of it. Margin 30 = room for the DropShadowEffect (blur 24 + depth 4); without it the shadow
+        is clipped at all four corners.
+    -->
+    <Grid x:Name="Overlay">
     <Border x:Name="Chrome" CornerRadius="14" Background="{DynamicResource YuukaBg}"
             BorderBrush="{DynamicResource YuukaBorder}" BorderThickness="1" Margin="30">
         <Border.Effect>
@@ -86,4 +92,5 @@
             </TabControl>
         </Grid>
     </Border>
+    </Grid>
 </Window>

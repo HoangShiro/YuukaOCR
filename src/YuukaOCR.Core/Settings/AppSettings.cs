@@ -19,6 +19,12 @@ public sealed class AppSettings
     [JsonPropertyName("sub_window_spacing")] public int SubWindowSpacing { get; set; } = 5;
     [JsonPropertyName("min_sub_win_width")] public int MinSubWindowWidth { get; set; } = 200;
 
+    /// <summary>
+    /// Last size of every resizable window, keyed by <see cref="WindowSizeKeys"/>. Written when the
+    /// user finishes resizing, so the next open restores what they chose.
+    /// </summary>
+    [JsonPropertyName("window_sizes")] public Dictionary<string, WindowSize> WindowSizes { get; set; } = new();
+
     // --- behaviour ------------------------------------------------------------
     [JsonPropertyName("auto_update_enabled")] public bool AutoUpdateEnabled { get; set; } = true;
     [JsonPropertyName("start_with_system")] public bool StartWithSystem { get; set; }
@@ -110,6 +116,7 @@ public sealed class AppSettings
         Positions ??= new();
         RecentProviders ??= new();
         RecentModels ??= new();
+        NormalizeWindowSizes();
         Language = Localization.L.Normalize(Language);
         UpdateNotifiedVersion = (UpdateNotifiedVersion ?? "").Trim();
         Theme.Normalize();
@@ -138,6 +145,32 @@ public sealed class AppSettings
             while (!seen.Add(action.Id)) action.Id = AgentActions.NewId();
         }
     }
+
+    /// <summary>
+    /// Repairs the stored window sizes: a hand-edited file can hold a negative, a zero, a NaN (JSON has
+    /// no NaN, but a "null" deserializes to 0) or a size no monitor can show. An entry that cannot be
+    /// used is dropped rather than clamped to something absurd, so the window falls back to its default.
+    /// </summary>
+    private void NormalizeWindowSizes()
+    {
+        WindowSizes ??= new();
+
+        foreach (var key in WindowSizes.Keys.ToList())
+        {
+            var size = WindowSizes[key];
+            if (size is null || !size.IsUsable)
+            {
+                WindowSizes.Remove(key);
+                continue;
+            }
+
+            WindowSizes[key] = size.Clamped();
+        }
+    }
+
+    /// <summary>The stored size for <paramref name="key"/>, or null when the user never resized it.</summary>
+    public WindowSize? SizeOf(string key) =>
+        WindowSizes.TryGetValue(key, out var size) && size.IsUsable ? size : null;
 
     public void RememberProvider(string providerId)
     {

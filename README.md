@@ -40,7 +40,7 @@ Architecture in detail: see [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md).
 ```powershell
 dotnet build YuukaOCR.slnx -c Release
 dotnet run --project src/YuukaOCR.App            # run the dev build
-dotnet run --project tests/YuukaOCR.Tests        # 53 tests
+dotnet run --project tests/YuukaOCR.Tests        # 65 tests
 pwsh ./build.ps1                                 # publish into publish/
 pwsh ./build.ps1 -SelfContained                  # bundle the runtime, no .NET install needed
 ```
@@ -129,6 +129,16 @@ To copy the app to another machine with nothing installed: `pwsh ./build.ps1 -Se
 
 ### The result bubble
 
+* **Markdown is rendered, not shown as source.** Headings, bold/italic/strikethrough, inline code,
+  links, nested lists with task boxes (`- [x]`), quotes, fenced code blocks, rules and **GFM tables**
+  (with per-column alignment) are drawn as a document — a table becomes a real table. The text is
+  still plain selectable text on top of that, so a selection inside a table or a quote copies exactly
+  what you picked; the Markdown *as received* is what the copy-all button and the agent's context use,
+  so nothing is flattened on the way.
+* **Resize it from any corner or edge**, exactly like a desktop window. Until the first drag the
+  bubble sizes itself to its text — as wide as the widest line needs, never narrower than
+  *Layout → Minimum width*, never wider than the natural width. After a drag the size you left it at
+  comes back next time (size only: the bubble still places itself where the D-pad says).
 * **The text is selectable.** Select any part of it and a small accent-filled copy button appears
   next to the selection — that copies exactly what you picked. It disappears again as soon as the
   selection is cleared, the bubble loses focus, or you click anywhere else in it, so it never floats
@@ -145,6 +155,9 @@ To copy the app to another machine with nothing installed: `pwsh ./build.ps1 -Se
 * Actions are predefined quick-chat turns: each one sends the global *Agent instruction* plus its own
   *Action instruction* plus the context, through the **same conversation** as the chat box, so "and
   in Vietnamese?" works right after "summarize this".
+* **Replies are rendered Markdown too.** A model answers with tables, lists, code and emphasis, so an
+  agent reply is drawn the same way as the OCR text (a table becomes a table); your own turns stay
+  exactly what you typed, so `**this**` does not turn into bold.
 * **The conversation is selectable too** — both your own messages and the agent's replies. Select any
   part of a message and the same floating copy button appears; `Ctrl+C` works as well, and the highlight
   stays painted (dimmed) when you click into the chat box, so a quote you picked is still visible while
@@ -190,6 +203,11 @@ filled from the provider and ranked:
 | **Status** | API calls per model, uptime, per-source statistics |
 | **Console** | Live log lines |
 
+The window is a normal desktop window: **drag any corner or edge** to resize it and the tab content
+follows the width (it never scrolls sideways), and it stays **on top** of other windows like the bar
+and the bubble, so it does not disappear behind the app you are working in. The size you leave it at
+comes back the next time you open it.
+
 Changing the language in **Appearance → Language** applies immediately: the settings window reopens
 on the same tab, and the bar, tooltips, dialogs and log messages follow. The choice is stored as
 `language` in `user/settings.json`. English is the default — a settings file without that key starts
@@ -201,7 +219,9 @@ without a table behind it.
 
 One window (`Ui/FullTextWindow.xaml`) serves every "this text is too long for its box" case — the three
 prompt fields, the action instruction and the history entries. From *Settings* it covers the whole
-settings window; from the bar it centres itself on the monitor.
+settings window **exactly** — same rectangle, same card, not a pixel more or less, so it reads as the
+window expanding rather than a second window appearing; from the bar it centres itself on the monitor.
+It is resizable from every corner and remembers its own size.
 
 * **Back** (top left) closes it and **returns the text exactly as it was** — nothing is applied, nothing
   is discarded.
@@ -291,7 +311,11 @@ Every start compares the running version against the latest **GitHub release** o
 | UI | *Settings → System → Update* (installed version, latest version, status, *Check*, *Download & install*) |
 | Startup check | `App.xaml.cs` — fire and forget; a failure only reaches the log |
 
-* A release is "newer" only when its tag parses **and** is greater; equal or older shows *up to date*.
+* The version comes from the release **tag**, or — when the tag carries no number — from the release
+  **name** or the package file name. This repository publishes every build under the moving tag
+  `Windows` with the number in `YuukaOCR v2.2` / `YuukaOCR.v2.2.zip`, so reading the tag alone made
+  every check fail with "The release tag could not be read: Windows".
+* A release is "newer" only when its version parses **and** is greater; equal or older shows *up to date*.
 * The download asset is the first `.zip` whose name contains `win-x64` (that is what
   `build.ps1` publishes); a release without one still reports the version, with *install* disabled.
 * The zip is unpacked to a temp folder, the `user/` folder of the package is dropped, the install

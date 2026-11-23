@@ -52,6 +52,7 @@ providers, file loading) is testable without opening a window.
 | `ThemeSettings.cs` | Appearance choices: the active `preset`, `frame_opacity`, `background_opacity`, font family + size. `Normalize()` repairs a hand-edited file (unknown preset → default, opacity and font size **snapped to their slider ticks**), and `Bar`/`Background` fold the opacities into the palette colours. |
 | `ThemePreset.cs` | `ThemePalette` (the 11 colours a window actually paints) and `ThemePresets` (the table of 8 looks). A preset authors only 5 colours — bar, accent, close, background, text — and the panel/hover/border steps are derived from the background brightness, while bar and accent text is derived from the surface luminance. One row here = one new theme. |
 | `WindowPosition.cs` | `X/Y` pair used by the `Positions` dictionary. |
+| `WindowSize.cs` | `WindowSize` (`width`/`height`) plus `WindowSizeKeys` — one key per resizable window (`settings`, `fulltext`, `result`) and the shared `MinSide`/`MaxSide` guard. Stored in `AppSettings.WindowSizes` under the legacy-compatible `window_sizes` key, **size only, never position**, because every window places itself. |
 
 ### 2.3 `Providers/`
 
@@ -119,7 +120,14 @@ stub cannot pass), plus that every offered language has a table and vice versa.
 resolves it at load time, switching language rebuilds the settings window (`MainWindow.Relocalize`
 reopens it on the tab the user was on) instead of re-binding every label.
 
-### 2.8 Everything else
+### 2.8 `Markdown/` (the result bubble's renderer, WPF-free)
+
+| File | Responsibility |
+| --- | --- |
+| `MarkdownModel.cs` | The block/inline model: `MdHeading`, `MdParagraph`, `MdCodeBlock`, `MdQuote`, `MdList`/`MdListItem` (with a GFM task box), `MdTable`/`MdTableRow` + `MdAlign`, `MdRule`; inlines `MdText`, `MdCode`, `MdEmphasis`, `MdLink`, `MdImage`, `MdLineBreak`. |
+| `MarkdownParser.cs` | Parses model output into that model: ATX and setext headings, fenced and 4-space code, blockquotes, nested ordered/unordered lists with task boxes, GFM tables with per-column alignment, rules, and inline emphasis/code/links/autolinks/images/escapes/hard breaks. Two deliberate departures from CommonMark for OCR text: a single newline is a line break (it preserves the scanned line structure) and raw HTML is kept as literal text (the input is never trusted). Lives in Core so the dependency-free test runner can exercise it. |
+
+### 2.9 Everything else
 
 | File | Responsibility |
 | --- | --- |
@@ -130,8 +138,9 @@ reopens it on the tab the user was on) instead of re-binding every label.
 | `Logging/ActivityLog.cs` | JSON model of `user/log.json` (`api_calls`, `recent_outputs`, `recent_prompts`, `chat_history`, …). `MaxChatEntries = 200`. |
 | `Logging/ApiTrace.cs` | Opt-in request/response trace to `user/api-debug.log`, enabled only by `YUUKA_API_DEBUG=1` (anything but `0`/`false`). Off by default so a shipped build carries no payloads; `build.ps1` deletes stray trace files. |
 | `Physics/SpringMotion.cs` | Spring integration with a fixed 16 ms step + edge clamping + bounce. |
+| `Ui/ResizeMath.cs` | `WindowRect` (a plain `Left/Top/Width/Height` record struct with `Right`/`Bottom`, so window geometry can be reasoned about and tested without a `Window`), `ResizeEdge` (4 corners, 4 edges) and `Drag(edge, start, dx, dy, minWidth, minHeight)` — the dragged side follows the pointer, the opposite side stays anchored, and the minimum is never crossed. `Fit(rect, areaLeft, areaTop, areaWidth, areaHeight, minWidth, minHeight)` fits a remembered size into the work area. Pure arithmetic: the whole resize behaviour is tested in the CLI runner, no mouse needed. |
 | `Update/AppVersion.cs` | Lenient 4-component version (`v2.1.0`, `2.1`, `2.2.0-beta.1`, `2.2.0+build.7`), `TryParse`, `From(Version)`, `IComparable`. A tag that does not parse is never "newer". |
-| `Update/GitHubUpdateService.cs` | The release-based updater: `CheckAsync` (`GET /repos/{owner}/{repo}/releases/latest`), `Interpret(json)` (pure, so the test runner can feed it documents), asset pick (`*.zip` containing `win-x64`), `DownloadAsync` with `Progress<double>`, zip validation, `InstallerScript` + `Install` (unpack → drop the package's `user/` → overwrite → restart). Also `TryParseRepository` (https and `git@` remotes) and `IsCheckout`. |
+| `Update/GitHubUpdateService.cs` | The release-based updater: `CheckAsync` (`GET /repos/{owner}/{repo}/releases/latest`), `Interpret(json)` (pure, so the test runner can feed it documents), asset pick (`*.zip` containing `win-x64`), `DownloadAsync` with `Progress<double>`, zip validation, `InstallerScript` + `Install` (unpack → drop the package's `user/` → overwrite → restart). Also `TryReadVersion`/`TryExtractVersion` (version from tag → name → asset names, because the moving `Windows` tag carries no number), `TryParseRepository` (https and `git@` remotes) and `IsCheckout`. |
 | `Update/GitUpdateService.cs` | `git fetch/rev-parse/pull --ff-only`, stash before pulling, restore the stash if the pull fails; `RemoteUrl`/`IsCheckout` read `.git/config` without spawning git. Kept as the *development checkout* update path. |
 
 ---
@@ -148,17 +157,20 @@ reopens it on the tab the user was on) instead of re-binding every label.
 | `Ui/Theme.cs` | Applies the active palette to a window's `Resources` (`YuukaBg`, `YuukaPanel`, `YuukaPanelHover`, `YuukaBorder`, `YuukaText`, `YuukaSubtle`, `YuukaAccent`, `YuukaOnAccent`, `YuukaDanger`, `YuukaBarBg`, `YuukaBarText`, `YuukaFontFamily`, `YuukaFontSize`). Every window calls it on construction and again on `Settings.Changed`, which is what makes a preset switch repaint the bar, the bubble *and* the settings window at once. |
 | `Ui/Localization/TrExtension.cs` | `{ui:Tr key}` markup extension → `L.T(key)`. |
 | `Ui/MainWindow.xaml(.cs)` | The bar: dragging, physics, hooking, hotkey, clipboard, drop, open settings, quit. Owns the result window, so it also serves the Layout *Test* preview (`ShowResultPreview`, shown without focus) and `PromptForKey`, the entry point for the startup key check. |
-| `Ui/ResultWindow.xaml(.cs)` | Result bubble: placed by D-pad + spacing, flies out on the spring, drag to move. The text is a read-only selectable `TextBox`; a selection opens a floating icon-only copy button (and pins the chat scope to that text), and the icon-only copy button under *close* copies everything. The borderless action bar at the bottom holds the registered action buttons (icon-only, ≤10, horizontally scrollable) plus the context label, chat box and send button, all on one row. `ShowText(text, barBounds, activate)` — `activate: false` is the preview, so the bubble cannot steal focus from the settings window. Implements `IThemedWindow`. |
-| `Ui/FullTextWindow.xaml(.cs)` | **Full Text Edit Mode** — the one expanded-text surface. `Show(services, titleKey, text, readOnly)` returns the edited text or `null` for *Back*; *Done* is hidden in read-only mode. Owned by the settings window it covers that window's bounds, otherwise it centres on the work area. Borderless chrome with the same 22 DIP shadow padding as the bubble. |
+| `Ui/ResultWindow.xaml(.cs)` | Result bubble: placed by D-pad + spacing, flies out on the spring, drag to move. The text is a read-only `RichTextBox` showing `MarkdownView` of the result, so it stays selectable while it can also draw a table; the conversation renders the same way (agent replies are Markdown, your own turns stay literal) and a selection opens a floating icon-only copy button (and pins the chat scope to that text), and the icon-only copy button under *close* copies everything. `_rawText` keeps the Markdown as received, so copy-all and the agent's context are never flattened. Resizable from every corner (first drag switches `SizeToContent` off), and the width is `clamp(widest line, min_sub_win_width, 620·scale)` — which is what finally makes the *Minimum width* slider do something. `ShowText(text, barBounds, activate)` — `activate: false` is the preview, so the bubble cannot steal focus from the settings window. Implements `IThemedWindow`. |
+| `Ui/FullTextWindow.xaml(.cs)` | **Full Text Edit Mode** — the one expanded-text surface. `Show(services, titleKey, text, readOnly)` returns the edited text or `null` for *Back*; *Done* is hidden in read-only mode. Owned by the settings window it covers that window's **exact** bounds — `PlaceOver(owner)` copies left/top/width/height and both windows use the same 30 DIP shadow padding, so not one pixel of the card differs — otherwise it centres on the work area at its remembered size. Resizable from every corner, always on top. |
 | `Ui/Controls/PromptTools.xaml(.cs)` | The expand/reset pair attached to every prompt field: `Initialize(services, box, titleKey, defaultText)` — expand opens `FullTextWindow`, reset restores the shipped default (the button is disabled when the field has no shipped default). Raises `Committed` because assigning `TextBox.Text` programmatically never fires `LostFocus`, which is what the tab used to save on. |
 | `Ui/SnipOverlay.xaml(.cs)` | Screen region selection, returns a physical-pixel `ScreenRect`. |
-| `Ui/ConfigWindow.xaml(.cs)` | 8-tab settings shell (also the owner that `FullTextWindow` covers) (System, Appearance, Layout, Hooking, Prompt/Agent, History, Status, Console), repaints through `AppearanceSync`, navigates to a tab/provider, forwards `LayoutPanel.TestRequested` as `TestResultRequested`, refreshes History/Status when their tab is opened, and hosts `ShowKeyPrompt` for the startup check. |
+| `Ui/ConfigWindow.xaml(.cs)` | 8-tab settings shell, resizable from every corner (the tab content follows the width) and always on top (also the owner that `FullTextWindow` covers) (System, Appearance, Layout, Hooking, Prompt/Agent, History, Status, Console), repaints through `AppearanceSync`, navigates to a tab/provider, forwards `LayoutPanel.TestRequested` as `TestResultRequested`, refreshes History/Status when their tab is opened, and hosts `ShowKeyPrompt` for the startup check. |
 | `Ui/Controls/HotkeyBox.xaml(.cs)` | Captures a hotkey (key or middle mouse/X1/X2). |
 | `Ui/Controls/ModelPicker.xaml(.cs)` | The model field: a `TextBox` plus a non-focusable `Popup` list, because an editable `ComboBox` re-syncs its text from `SelectedItem` when the dropdown opens and wipes what was typed. Focus or a click shows the whole list, typing filters it (every word must match), arrows move, Enter/click/blur commits — and an unknown name stays a valid custom model. |
 | `Ui/Controls/ThemeCard.xaml(.cs)` | One preset card: a `RadioButton` (so `GroupName` gives exclusivity for free) drawing a miniature of the app — bar pill, accent dot, panel with two text lines. The preview colours are pushed in from the preset itself, not from the active theme, so the cards keep showing what each preset looks like while the window around them repaints. |
 | `Ui/Controls/TickMarks.cs` | Draws the tick marks and their numbers under a slider. WPF only renders ticks through a `TickBar`, and the app's slider template is hand-written, so this element does it directly: one line per step, the passed part in the accent colour, the numbers laid out left to right with colliding labels dropped, and the maximum always included. |
 | `Ui/PngEncoder.cs` | `CapturedImage` / `BitmapSource` → PNG bytes. |
 | `Ui/SelectionCopy.cs` | `Attach(TextBox)` → floating icon-only copy button next to the selection, positioned in the box's own coordinate space so it follows a scrolled line. Used by the result bubble and every History row. `Track(box, popup)` owns the button's lifetime: it hides when the box loses keyboard focus (unless focus went into the popup itself), when the window is deactivated, and on any click outside the box. The popup stays `StaysOpen="True"` on purpose — a self-closing popup captures the mouse and eats the drag that creates the selection — so those conditions are explicit. |
+| `Ui/ResizeGrips.cs` | `Attach(window, overlay, chrome, begin, resized)` adds the eight handles a borderless window does not get from the OS — four corners and four edges, laid out **on the visible card edge** inside the transparent shadow padding, each with the cursor a desktop window would show. The drag itself is `Core/Ui/ResizeMath`, so the geometry is testable without a mouse. `begin` may refuse a drag (a bubble that sizes to its content switches to a fixed size there); `resized` fires once per finished drag, which is when a size is worth remembering. |
+| `Ui/WindowSizeMemory.cs` | `Restore(window, services, key)` applies a remembered size (fitted into the work area, size only — never the position) and returns `false` when the user never resized, so the caller can pick its own default; `Remember(services, key, width, height)` stores it in `AppSettings.WindowSizes`. |
+| `Ui/MarkdownView.cs` | Renders the Core `MdBlock` model into a `FlowDocument`: headings, paragraphs, lists (task boxes drawn as ☑/☐ glyphs, because a real checkbox cannot live in a `FlowDocument`), quotes, fenced code on the panel colour, rules, emphasis/code/links/images, and GFM tables with per-column alignment. A `FlowDocument` is the only WPF text element that can draw a table, and a read-only `RichTextBox` is the only one that keeps real selection on top of it. Links open only `http`/`https`. |
 | `Ui/Controls/ActionIcons.cs` | The icon table: path data in a 16×16 box by **key** (`chat`, `translate`, `summarize`, `explain`, `check`, `list`, `code`, `search`, `star`, `bulb`, `wand`, `quill`) plus the chrome glyphs (`copy`, `send`, `expand`, `collapse`, `remove`, `plus`), and `Glyph(key, size, brush)` / `Glyph(key, size, "YuukaText")` — the second overload binds the stroke to a theme resource so the glyph follows a theme switch. Core stores the key, this turns it into pixels. |
 | `Ui/Controls/SliderSetup.cs` | `Apply(slider, key)` — pushes a `SliderSpec`'s range/step into a `Slider`. Every tab calls it, so the XAML numbers are only the designer preview. |
 | `Ui/Tabs/*.xaml(.cs)` | 8 tabs: System, Appearance, Layout, Hooking, Prompt/Agent, History, Status, Console. |
@@ -399,12 +411,17 @@ sequenceDiagram
     control template that hard-codes a `{DynamicResource …}` background swallows every colour a caller
     sets, so `YuukaChipButton` paints `{TemplateBinding Background}` and keeps its default in a Setter.
 
-35. **Conversation messages are read-only text boxes, not labels** — a `TextBox` is the only WPF text
-    element that selects by mouse, keeps the selection when focus moves on and copies on `Ctrl+C`, so
-    `ResultWindow.CreateMessageBox` builds one with border, caret, padding, tab stop and internal
-    scrollers switched off. It looks like the `TextBlock` it replaced (same font, size, alignment,
-    margin), and `SelectionCopy.Attach` gives it the floating copy button; the trackers are disposed
-    when the list is rebuilt.
+35. **Conversation messages are read-only text boxes, not labels — and the agent's side is Markdown**
+    — a `TextBoxBase` is the only WPF text element that selects by mouse, keeps the selection when
+    focus moves on and copies on `Ctrl+C`, so `ResultWindow.CreateMessageBox` builds one with border,
+    caret, padding, tab stop and internal scrollers switched off; it looks like the `TextBlock` it
+    replaced (same font, size, alignment, margin), and `SelectionCopy.Attach` gives it the floating
+    copy button. The two sides differ on purpose: your own turn is a plain `TextBox` (typing `**this**`
+    must stay what you typed) while the reply is a `RichTextBox` holding `MarkdownView.Build(...)`,
+    because a model answers in Markdown and the source of a table is not an answer. Disabling the
+    internal scrollers is also what makes the `RichTextBox` measure to its document instead of a
+    default box height, so a reply grows like the plain message did. The trackers are disposed when the
+    list is rebuilt.
 
 36. **A press that does nothing is a bug** — the bubble's controls must never return early and leave
     the user with no reaction. `SendChatAsync` used to `return` on an empty box, which produced no
@@ -415,6 +432,30 @@ sequenceDiagram
     with the scope, the context length and the history size — never the text, never a key — because
     that is what separates "the model ignored the context" from "no context was sent".
 
+37. **A borderless window that can be resized needs three things, never two** — `ResizeGrips.Attach`
+    (the eight handles, on the card edge inside the shadow padding), `WindowSizeMemory.Restore` in the
+    constructor and `WindowSizeMemory.Remember` in the drag's end callback. `WindowStyle=None` means the
+    OS supplies no resize border at all, so a `ResizeMode="CanResize"` alone does nothing visible; and a
+    remembered size is *size only*, because each window places itself and a stored position would fight
+    the placement (the bubble's D-pad, the settings window's centre, the editor covering its owner).
+
+38. **`WindowSizeMemory.Restore` returning `false` is information** — it means the user never resized
+    this window, so the caller picks its own default instead of a hard-coded number. `FullTextWindow`
+    uses that to fall back to 80 % of the work area, `ResultWindow` to keep sizing itself to its text.
+
+39. **Text that must stay selectable cannot be a `TextBlock`, and a table cannot be anything else** — a
+    `FlowDocument` is the only WPF text element that draws a `Table`, and a read-only `RichTextBox` is
+    the only one that keeps real mouse selection on top of it. Both facts drive `MarkdownView` +
+    `ResultBox`; the Markdown as received is kept in `_rawText` so copy-all and the agent's context are
+    never flattened into the rendered text.
+
+40. **Text a user typed is committed before the UI reads it back** — the icon, chip and expand buttons
+    are `Focusable=False` on purpose (a click must not move the caret out of the field), so a
+    `LostFocus` save never runs when they are clicked. Every path that rebuilds an editor
+    (`BuildActionTabs`, the window's `Closing`) calls `PromptAgentTab.CommitEdits()` first, and
+    `_editorActionId` records which action the two boxes hold text for so a commit that happens during
+    a selection change cannot write into the wrong action.
+
 ---
 
 ## 8. Build / run / test
@@ -423,7 +464,7 @@ sequenceDiagram
 dotnet build YuukaOCR.slnx -c Release          # build the whole solution
 dotnet run --project src/YuukaOCR.App          # run the dev build
 dotnet run --project src/YuukaOCR.App -- --config   # open the settings window directly
-dotnet run --project tests/YuukaOCR.Tests      # 53 tests, no NuGet needed
+dotnet run --project tests/YuukaOCR.Tests      # 65 tests, no NuGet needed
 python tools/makeicon.py --check               # regenerate/verify the app icon
 YUUKA_API_DEBUG=1 dotnet run --project src/YuukaOCR.App   # writes user/api-debug.log (off by default)
 dotnet run --project tools/xamlcheck -c Release            # parses every XAML file + builds the bubble
@@ -556,7 +597,7 @@ System tab ──> CheckAsync (manual) ──> DownloadAsync(progress) ──> I
 
 | Concern | Decision |
 | --- | --- |
-| Version source | The assembly version (`2.1.0`), compared with the release tag after a lenient parse |
+| Version source | The assembly version (`2.1.0`) against the release **tag**, then the release **name**, then the asset names — this repository publishes every build under the moving tag `Windows` with the number in `YuukaOCR v2.2` / `YuukaOCR.v2.2.zip`, so reading `tag_name` alone failed every check with "The release tag could not be read: Windows" (`TryReadVersion`/`TryExtractVersion`) |
 | "Up to date" | Equal **or** older, and no announcement is stored, so the next start checks again silently |
 | One notification per release | `UpdateNotifiedVersion` in `user/settings.json`, written by the only caller that announces |
 | No asset / bad tag / offline / rate limited | A status line in the System tab; nothing throws, nothing blocks startup |

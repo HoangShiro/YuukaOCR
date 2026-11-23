@@ -4,10 +4,15 @@
         xmlns:ui="clr-namespace:YuukaOCR.App.Ui.Localization"
         Title="Yuuka" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         Icon="pack://application:,,,/YuukaOCR;component/Assets/app-icon.png"
-        ShowInTaskbar="False" Topmost="True" SizeToContent="Height" ResizeMode="NoResize"
+        ShowInTaskbar="False" Topmost="True" SizeToContent="Height" ResizeMode="CanResize"
+        MinHeight="100"
         SnapsToDevicePixels="True" UseLayoutRounding="True" ShowActivated="False" Opacity="0">
 
-    <!-- Margin 22 = room for the DropShadowEffect (blur 18 + depth 3); without it the shadow is clipped at all four corners. -->
+    <!--
+        Overlay carries the resize handles, added in code along the visible card edge. Margin 22 = room for
+        the DropShadowEffect (blur 18 + depth 3); without it the shadow is clipped at all four corners.
+    -->
+    <Grid x:Name="Overlay">
     <Border x:Name="Root" CornerRadius="12" Background="{DynamicResource YuukaBg}"
             BorderBrush="{DynamicResource YuukaBorder}" BorderThickness="1" Margin="22">
         <Border.Effect>
@@ -21,7 +26,7 @@
             </Grid.ColumnDefinitions>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
@@ -62,19 +67,22 @@
                 </Button>
             </StackPanel>
 
-            <!-- OCR text: a read-only TextBox, because only a TextBox gives real text selection -->
-            <ScrollViewer Grid.Row="1" Grid.Column="0" MaxHeight="380" Margin="0,7,4,0"
-                          VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                <TextBox x:Name="ResultBox" IsReadOnly="True" IsReadOnlyCaretVisible="False"
+            <!--
+                The OCR text, rendered as Markdown (headings, lists, tables, code, quotes, links) in a
+                read-only RichTextBox: a FlowDocument is the only WPF text element that can draw a table,
+                and a read-only RichTextBox is the only one that keeps real text selection on top of it.
+                The box scrolls itself, so the bubble's own height stays bounded.
+            -->
+            <RichTextBox x:Name="ResultBox" Grid.Row="1" Grid.Column="0" MaxHeight="380" Margin="0,7,4,0"
+                         IsReadOnly="True" IsReadOnlyCaretVisible="False" IsDocumentEnabled="True"
                          IsInactiveSelectionHighlightEnabled="True"
-                         TextWrapping="Wrap" BorderThickness="0" Padding="0" Background="Transparent"
+                         BorderThickness="0" Padding="0" Background="Transparent"
                          Foreground="{DynamicResource YuukaText}"
                          FontFamily="{DynamicResource YuukaFontFamily}"
                          FontSize="{DynamicResource YuukaFontSize}"
                          SelectionBrush="{DynamicResource YuukaAccent}"
-                         VerticalScrollBarVisibility="Disabled" HorizontalScrollBarVisibility="Disabled"
+                         VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                          SelectionChanged="OnSelectionChanged" />
-            </ScrollViewer>
 
             <!-- conversation: only visible once the agent has said something -->
             <Border x:Name="AnswerPanel" Grid.Row="2" Grid.Column="0" Visibility="Collapsed"
@@ -146,4 +154,5 @@
             </Popup>
         </Grid>
     </Border>
+    </Grid>
 </Window>

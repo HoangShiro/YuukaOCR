@@ -24,6 +24,14 @@ public partial class PromptAgentTab : UserControl
 {
     private AppServices _services = null!;
     private string? _selectedId;
+
+    /// <summary>
+    /// The action the two editors currently hold text for. Not always <see cref="_selectedId"/>: a
+    /// commit can run in the middle of a selection change, and the text in the boxes then belongs to the
+    /// action it was typed for — never to the one that is about to be selected.
+    /// </summary>
+    private string? _editorActionId;
+
     private bool _loading = true;
 
     // Drag-to-reorder state for the action tabs. A drag only starts after the pointer really moved,
@@ -80,6 +88,26 @@ public partial class PromptAgentTab : UserControl
 
     // -------------------------------------------------------------------- OCR
 
+    /// <summary>
+    /// Writes every editor on this tab into settings.
+    ///
+    /// The tab used to persist on <c>LostFocus</c> only, which is not enough: the icon picker, the action
+    /// chips and the expand/reset buttons are <c>Focusable=False</c> on purpose (they must not steal the
+    /// caret), so clicking one moves no focus, fires no LostFocus — and the handler that rebuilds the tab
+    /// from settings then overwrote the field the user had just typed into. The reported case was
+    /// "type an action instruction, click an icon, the instruction is back to its default". Every path
+    /// that rebuilds anything therefore commits first, and so does closing the window.
+    /// </summary>
+    public void CommitEdits()
+    {
+        if (_loading) return;
+
+        SavePrompt();
+        SaveInstruction();
+        SaveActionName(rebuild: false);
+        SaveActionInstruction();
+    }
+
     private void OnPromptEnabled(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
@@ -92,7 +120,12 @@ public partial class PromptAgentTab : UserControl
     private void SavePrompt()
     {
         if (_loading) return;
+
         var prompt = PromptBox.Text ?? "";
+        // No write when nothing changed: every Update repaints every open window (AppearanceSync), and
+        // LostFocus fires on every click into and out of the field.
+        if (prompt == _services.Settings.Settings.CustomPrompt) return;
+
         _services.Settings.Update(s => s.CustomPrompt = prompt);
     }
 
@@ -103,7 +136,10 @@ public partial class PromptAgentTab : UserControl
     private void SaveInstruction()
     {
         if (_loading) return;
+
         var instruction = InstructionBox.Text ?? "";
+        if (instruction == _services.Settings.Settings.Agent.Instruction) return;
+
         _services.Settings.Update(s => s.Agent.Instruction = instruction);
     }
 
@@ -195,6 +231,10 @@ public partial class PromptAgentTab : UserControl
 
     private void BuildActionTabs()
     {
+        // Whatever is in the editors belongs to the selection that is still current — commit it before
+        // reading settings back into the fields, or the rebuild overwrites it (see CommitEdits).
+        CommitEdits();
+
         var actions = _services.Settings.Settings.Actions;
 
         ActionTabs.Children.Clear();
@@ -249,6 +289,9 @@ public partial class PromptAgentTab : UserControl
             ActionInstructionBox.Text = current.Instruction;
             BuildIconPicker(current.Icon);
         }
+
+        // The editors now hold this action's text, so a later commit must write it back to this action.
+        _editorActionId = current?.Id;
     }
 
     private void CommitModel()
@@ -330,32 +373,49 @@ public partial class PromptAgentTab : UserControl
         BuildActionTabs();
     }
 
-    private void OnActionNameLostFocus(object sender, RoutedEventArgs e)
+    private void OnActionNameLostFocus(object sender, RoutedEventArgs e) => SaveActionName(rebuild: true);
+
+    /// <summary>
+    /// Writes the action name. <paramref name="rebuild"/> is false while committing pending edits, because
+    /// the caller is about to rebuild anyway (and rebuilding from inside a rebuild would loop).
+    /// </summary>
+    private bool SaveActionName(bool rebuild)
     {
-        var id = _selectedId;
-        if (_loading || id is null) return;
+        var id = _editorActionId;
+        if (_loading || id is null) return false;
 
         var name = (ActionNameBox.Text ?? "").Trim();
-        _services.Settings.Update(s =>
+        var action = _services.Settings.Settings.Actions.FirstOrDefault(a => a.Id == id);
+        if (action is null) return false;
+
+        if (name != action.Name)
         {
-            var action = s.Actions.FirstOrDefault(a => a.Id == id);
-            if (action is not null) action.Name = name;
-        });
-        BuildActionTabs();
+            _services.Settings.Update(s =>
+            {
+                var target = s.Actions.FirstOrDefault(a => a.Id == id);
+                if (target is not null) target.Name = name;
+            });
+        }
+
+        if (rebuild) BuildActionTabs();
+        return true;
     }
 
     private void OnActionInstructionLostFocus(object sender, RoutedEventArgs e) => SaveActionInstruction();
 
     private void SaveActionInstruction()
     {
-        var id = _selectedId;
+        var id = _editorActionId;
         if (_loading || id is null) return;
 
         var instruction = ActionInstructionBox.Text ?? "";
+        var action = _services.Settings.Settings.Actions.FirstOrDefault(a => a.Id == id);
+        if (action is null || instruction == action.Instruction) return;
+
         _services.Settings.Update(s =>
         {
-            var action = s.Actions.FirstOrDefault(a => a.Id == id);
-            if (action is not null) action.Instruction = instruction;
+            var target = s.Actions.FirstOrDefault(a => a.Id == id);
+            if (target is not null) target.Instruction = instruction;
         });
     }
 

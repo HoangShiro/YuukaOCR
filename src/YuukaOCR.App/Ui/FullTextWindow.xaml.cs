@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Input;
 using YuukaOCR.App.Services;
 using YuukaOCR.Core.Localization;
+using YuukaOCR.Core.Settings;
 
 namespace YuukaOCR.App.Ui;
 
@@ -17,16 +18,18 @@ namespace YuukaOCR.App.Ui;
 public partial class FullTextWindow : Window
 {
     /// <summary>Room for the drop shadow; the visible card sits this far inside the window.</summary>
-    private const double ShadowPad = 22;
+    private const double ShadowPad = 30;
 
     private readonly bool _readOnly;
+    private readonly AppServices _services;
     private string? _result;
 
-    private FullTextWindow(AppServices services, string title, string text, bool readOnly)
+    internal FullTextWindow(AppServices services, string title, string text, bool readOnly)
     {
         InitializeComponent();
 
         _readOnly = readOnly;
+        _services = services;
 
         var settings = services.Settings.Settings;
         Theme.Apply(this, settings.Theme);
@@ -49,6 +52,10 @@ public partial class FullTextWindow : Window
         }
 
         PreviewKeyDown += OnWindowKeyDown;
+
+        // Resizable from every corner and edge, and the size it was left at comes back.
+        ResizeGrips.Attach(this, Overlay, Chrome,
+            resized: () => WindowSizeMemory.Remember(_services, WindowSizeKeys.FullText, Width, Height));
     }
 
     /// <summary>
@@ -62,23 +69,40 @@ public partial class FullTextWindow : Window
         if (owner is not null && owner.IsVisible)
         {
             window.Owner = owner;
-            // Cover the owner completely, padding included so the shadow is not clipped.
-            window.Left = owner.Left - ShadowPad;
-            window.Top = owner.Top - ShadowPad;
-            window.Width = Math.Max(owner.ActualWidth, 480) + ShadowPad * 2;
-            window.Height = Math.Max(owner.ActualHeight, 360) + ShadowPad * 2;
+            window.PlaceOver(owner);
         }
         else
         {
             var area = SystemParameters.WorkArea;
-            window.Width = Math.Min(area.Width * 0.8, 900) + ShadowPad * 2;
-            window.Height = Math.Min(area.Height * 0.8, 700) + ShadowPad * 2;
+
+            if (!WindowSizeMemory.Restore(window, services, WindowSizeKeys.FullText))
+            {
+                window.Width = Math.Min(area.Width * 0.8, 900) + ShadowPad * 2;
+                window.Height = Math.Min(area.Height * 0.8, 700) + ShadowPad * 2;
+            }
+
             window.Left = area.Left + (area.Width - window.Width) / 2;
             window.Top = area.Top + (area.Height - window.Height) / 2;
         }
 
         window.ShowDialog();
         return readOnly ? null : window._result;
+    }
+
+    /// <summary>
+    /// Takes exactly the owner's rectangle — not a pixel more. The editor is a stand-in for the settings
+    /// window while it is open, so it has to occupy the same space on screen, including the shadow padding
+    /// (both windows use the same 30 DIP pad, so the cards line up too).
+    ///
+    /// A floor keeps it usable when the owner is the small result bubble: the settings window is never
+    /// smaller than its own 820x580 minimum, so this never breaks the exact match.
+    /// </summary>
+    internal void PlaceOver(Window owner)
+    {
+        Width = Math.Max(owner.ActualWidth, MinWidth);
+        Height = Math.Max(owner.ActualHeight, MinHeight);
+        Left = owner.Left;
+        Top = owner.Top;
     }
 
     // ------------------------------------------------------------------ actions

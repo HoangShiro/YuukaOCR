@@ -174,6 +174,7 @@ public sealed class GitHubUpdateService : IDisposable
     public UpdateCheck Interpret(string json)
     {
         string? tag = null;
+        string? name = null;
         var assets = new List<UpdateAsset>();
 
         try
@@ -186,17 +187,20 @@ public sealed class GitHubUpdateService : IDisposable
             if (root.TryGetProperty("tag_name", out var tagElement) && tagElement.ValueKind == JsonValueKind.String)
                 tag = tagElement.GetString();
 
+            if (root.TryGetProperty("name", out var nameElement) && nameElement.ValueKind == JsonValueKind.String)
+                name = nameElement.GetString();
+
             if (root.TryGetProperty("assets", out var assetList) && assetList.ValueKind == JsonValueKind.Array)
             {
                 foreach (var item in assetList.EnumerateArray())
                 {
                     if (item.ValueKind != JsonValueKind.Object) continue;
-                    var name = item.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String ? n.GetString() : null;
+                    var assetName = item.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String ? n.GetString() : null;
                     var url = item.TryGetProperty("browser_download_url", out var u) && u.ValueKind == JsonValueKind.String ? u.GetString() : null;
                     var size = item.TryGetProperty("size", out var s) && s.ValueKind == JsonValueKind.Number ? s.GetInt64() : 0L;
 
-                    if (!string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(url))
-                        assets.Add(new UpdateAsset(name!, url!, size));
+                    if (!string.IsNullOrWhiteSpace(assetName) && !string.IsNullOrWhiteSpace(url))
+                        assets.Add(new UpdateAsset(assetName!, url!, size));
                 }
             }
         }
@@ -205,8 +209,8 @@ public sealed class GitHubUpdateService : IDisposable
             return UpdateCheck.Failed(CurrentVersion, KeyBadTag);
         }
 
-        if (string.IsNullOrWhiteSpace(tag) || !AppVersion.TryParse(tag, out var latest))
-            return UpdateCheck.Failed(CurrentVersion, KeyBadTag, tag ?? "");
+        if (!TryReadVersion(tag, name, assets, out var latest))
+            return UpdateCheck.Failed(CurrentVersion, KeyBadTag, DescribeTag(tag, name, assets));
 
         var available = latest > Current;
         var asset = PickAsset(assets);
@@ -218,6 +222,89 @@ public sealed class GitHubUpdateService : IDisposable
             return new UpdateCheck(true, CurrentVersion, latest.ToString(), true, null, KeyNoAsset, latest.ToString());
 
         return new UpdateCheck(true, CurrentVersion, latest.ToString(), true, asset, KeyAvailable, latest.ToString());
+    }
+
+    /// <summary>
+    /// The version a release claims to be. A release tag is hand-written and is not always a number:
+    /// this repository publishes every build under the moving tag <c>Windows</c> and puts the version in
+    /// the release name (<c>YuukaOCR v2.2</c>) and in the package name (<c>YuukaOCR.v2.2.zip</c>).
+    /// Reading only the tag turned every check into "the release tag could not be read: Windows".
+    ///
+    /// Order: the tag, then the release name, then the asset names — the first readable version wins.
+    /// </summary>
+    public static bool TryReadVersion(string? tag, string? name, IReadOnlyList<UpdateAsset>? assets, out AppVersion version)
+    {
+        if (AppVersion.TryParse(tag, out version)) return true;
+        if (AppVersion.TryParse(name, out version)) return true;
+
+        if (TryExtractVersion(tag, out version)) return true;
+        if (TryExtractVersion(name, out version)) return true;
+
+        if (assets is not null)
+        {
+            foreach (var asset in assets)
+                if (TryExtractVersion(asset.Name, out version))
+                    return true;
+        }
+
+        version = AppVersion.Zero;
+        return false;
+    }
+
+    /// <summary>
+    /// Finds a dotted version anywhere in a label: <c>"YuukaOCR v2.2"</c> → 2.2,
+    /// <c>"YuukaOCR-2.2.0-win-x64.zip"</c> → 2.2.0, <c>"YuukaOCR.v2.2.zip"</c> → 2.2.
+    /// A token must contain a dot and must not be part of a longer word, so a label like
+    /// <c>"Windows 11 build 5"</c> is not mistaken for a version.
+    /// </summary>
+    public static bool TryExtractVersion(string? text, out AppVersion version)
+    {
+        version = AppVersion.Zero;
+        if (string.IsNullOrWhiteSpace(text)) return false;
+
+        var span = text.AsSpan().Trim();
+
+        for (var i = 0; i < span.Length; i++)
+        {
+            var start = i;
+
+            if (span[i] is 'v' or 'V')
+            {
+                // "v2.2" — only when the v starts a word and a digit follows it.
+                if (i > 0 && char.IsLetterOrDigit(span[i - 1])) continue;
+                start = i + 1;
+                if (start >= span.Length || !char.IsAsciiDigit(span[start])) continue;
+            }
+            else if (!char.IsAsciiDigit(span[i]))
+            {
+                continue;
+            }
+            else if (i > 0 && (char.IsLetterOrDigit(span[i - 1]) || span[i - 1] == '.'))
+            {
+                continue;
+            }
+
+            var end = start;
+            while (end < span.Length && (char.IsAsciiDigit(span[end]) || span[end] == '.')) end++;
+
+            var token = span[start..end].TrimEnd('.');
+            i = end;
+
+            if (!token.Contains('.') || !AppVersion.TryParse(token.ToString(), out var parsed)) continue;
+
+            version = parsed;
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>The label to quote when nothing could be read, so the message names what it saw.</summary>
+    private static string DescribeTag(string? tag, string? name, IReadOnlyList<UpdateAsset> assets)
+    {
+        if (!string.IsNullOrWhiteSpace(tag)) return tag!;
+        if (!string.IsNullOrWhiteSpace(name)) return name!;
+        return assets.Count > 0 ? assets[0].Name : "";
     }
 
     /// <summary>Prefers the published win-x64 package, falls back to any zip, ignores everything else.</summary>

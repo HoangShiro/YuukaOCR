@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -38,6 +39,7 @@ internal static class LayoutProbe
         SelectionPopupLifetime(services);
         SelectionContext(services);
         ChatSelection(services);
+        ChatMarkdownRendering(services);
         ActionIconTheme(services);
         HookFollow();
         InputClipping(services);
@@ -46,6 +48,12 @@ internal static class LayoutProbe
         ActionButtons(services);
         ActionBarSync(services);
         ChatContextReachesTheModel(services);
+        MarkdownRendering(services);
+        MinimumWidthDrivesTheBubble(services);
+        WindowSizeMemoryRoundTrip(services);
+        ResizeHandles();
+        SettingsWindowGeometry(services);
+        PromptEditsSurviveIconClicks(services);
 
         return _failures;
     }
@@ -213,7 +221,7 @@ internal static class LayoutProbe
 
         try
         {
-            if (result.FindName("ResultBox") is not TextBox box || result.FindName("SelectionPopup") is not Popup popup)
+            if (result.FindName("ResultBox") is not TextBoxBase box || result.FindName("SelectionPopup") is not Popup popup)
             {
                 Fail("selection popup: ResultBox/SelectionPopup not found");
                 return;
@@ -224,7 +232,7 @@ internal static class LayoutProbe
             var checks = new List<string>();
 
             // 1. A selection opens it (the baseline the other cases start from).
-            box.Select(0, 5);
+            SelectText(box, "Yuuka");
             if (!popup.IsOpen)
             {
                 Fail("selection popup: a selection did not open the copy button");
@@ -237,12 +245,12 @@ internal static class LayoutProbe
             checks.Add($"click-away:{popup.IsOpen == false}");
 
             // 3. A click inside the text is not "away": the selection change decides, not this handler.
-            box.Select(0, 5);
+            SelectText(box, "Yuuka");
             Click(result, box);
             checks.Add($"click-inside-kept:{popup.IsOpen}");
 
             // 4. An empty selection always closes it.
-            box.Select(0, 0);
+            ClearSelection(box);
             checks.Add($"cleared:{popup.IsOpen == false}");
 
             // 5. Losing keyboard focus closes it, and so does hiding the window. Driven on a real
@@ -302,7 +310,7 @@ internal static class LayoutProbe
         try
         {
             Keyboard.Focus(box);
-            box.Select(0, 5);
+            SelectText(box, "Yuuka");
 
             // `Track` owns the lifetime rules only; opening is the selection handler's job (covered by
             // the bubble probe above), so open the popup the way it would be open.
@@ -348,7 +356,7 @@ internal static class LayoutProbe
             const string body = "Yuuka reads the text inside the selection.";
             result.ShowText(body, null, activate: false);
 
-            if (result.FindName("ResultBox") is not TextBox box || result.FindName("ChatBox") is not TextBox chat)
+            if (result.FindName("ResultBox") is not TextBoxBase box || result.FindName("ChatBox") is not TextBox chat)
             {
                 Fail("selection context: ResultBox/ChatBox not found");
                 return;
@@ -357,7 +365,7 @@ internal static class LayoutProbe
             var scope = result.FindName("ScopeText") as TextBlock;
             var checks = new List<string>();
 
-            box.Select(0, 5);
+            SelectText(box, "Yuuka");
             checks.Add($"pinned:{result.CurrentContext().Text == "Yuuka"}");
 
             // The reported flow: pick a sentence, then click into the chat box to type the question.
@@ -366,7 +374,7 @@ internal static class LayoutProbe
             Keyboard.Focus(chat);
             Pump();
 
-            checks.Add($"focus-moved-keeps-selection:{box.SelectionLength == 5}");
+            checks.Add($"focus-moved-keeps-selection:{SelectionText(box).Length == 5}");
             checks.Add($"focus-moved-keeps-context:{result.CurrentContext().Text == "Yuuka"}");
             checks.Add($"focus-moved-keeps-chip:{scope?.Text == L.T("result.context.selection")}");
 
@@ -375,19 +383,19 @@ internal static class LayoutProbe
             checks.Add($"highlight-still-painted:{HighlightInk(box) > 0}");
 
             // Even if the live highlight goes away entirely, the pinned copy is what gets sent.
-            box.Select(0, 0);
+            ClearSelection(box);
             checks.Add($"highlight-lost-keeps-context:{result.CurrentContext().Text == "Yuuka"}");
 
             // Dropping the selection on purpose (box focused) is still a scope reset.
             Keyboard.Focus(box);
             Pump();
-            box.Select(0, 5);
-            box.Select(0, 0);
+            SelectText(box, "Yuuka");
+            ClearSelection(box);
             checks.Add($"dropped-on-purpose-resets:{result.CurrentContext().Text == body}");
             checks.Add($"dropped-on-purpose-chip:{scope?.Text == L.T("result.context.all")}");
 
             // A new result starts clean.
-            box.Select(0, 5);
+            SelectText(box, "Yuuka");
             result.ShowText(body, null, activate: false);
             checks.Add($"new-result-resets:{result.CurrentContext().Text == body}");
 
@@ -417,15 +425,14 @@ internal static class LayoutProbe
     /// brush and whatever is behind it, and a colour match finds nothing even when the highlight is
     /// right there. A differential cannot miss it and does not care about the theme.
     /// </summary>
-    private static int HighlightInk(TextBox box)
+    private static int HighlightInk(TextBoxBase box)
     {
         var withSelection = Snapshot(box);
-        var start = box.SelectionStart;
-        var length = box.SelectionLength;
+        var restore = CaptureSelection(box);
 
-        box.Select(0, 0);
+        ClearSelection(box);
         var without = Snapshot(box);
-        box.Select(start, length);
+        restore();
 
         if (withSelection.Length != without.Length) return -1;
 
@@ -461,7 +468,9 @@ internal static class LayoutProbe
                 return;
             }
 
-            var bodies = list.Children.OfType<TextBox>().ToList();
+            // A user turn is a plain TextBox, an agent reply is a Markdown RichTextBox — both are
+            // selectable text, which is what this probe is about.
+            var bodies = list.Children.OfType<TextBoxBase>().ToList();
             var labels = list.Children.OfType<TextBlock>().ToList();
 
             if (bodies.Count != 2)
@@ -471,7 +480,7 @@ internal static class LayoutProbe
             }
 
             var order = string.Join(",", list.Children.OfType<FrameworkElement>()
-                .Select(child => child is TextBox ? "body" : "label"));
+                .Select(child => child is TextBoxBase ? "body" : "label"));
 
             var theme = services.Settings.Settings.Theme;
 
@@ -479,15 +488,17 @@ internal static class LayoutProbe
             {
                 $"labels:{labels.Count == 2}",
                 $"order:{order == "label,body,label,body"}",
+                $"kinds:{bodies[0] is TextBox && bodies[1] is RichTextBox}",
                 $"read-only:{bodies.All(b => b.IsReadOnly)}",
                 $"no-border:{bodies.All(b => b.BorderThickness == new Thickness(0))}",
                 $"transparent:{bodies.All(b => b.Background == Brushes.Transparent)}",
-                $"wrapping:{bodies.All(b => b.TextWrapping == TextWrapping.Wrap)}",
-                $"user-right:{bodies[0].HorizontalAlignment == HorizontalAlignment.Right && bodies[0].TextAlignment == TextAlignment.Right}",
-                $"agent-left:{bodies[1].HorizontalAlignment == HorizontalAlignment.Left && bodies[1].TextAlignment == TextAlignment.Left}",
+                // The user's box wraps its own text; the reply wraps because its document is one column.
+                $"wrapping:{bodies[0] is TextBox { TextWrapping: TextWrapping.Wrap } && bodies[1] is RichTextBox rich && rich.Document.ColumnWidth == double.PositiveInfinity}",
+                $"user-right:{bodies[0].HorizontalAlignment == HorizontalAlignment.Right && ((TextBox)bodies[0]).TextAlignment == TextAlignment.Right}",
+                $"agent-left:{bodies[1].HorizontalAlignment == HorizontalAlignment.Left}",
                 $"inactive-highlight:{bodies.All(b => b.IsInactiveSelectionHighlightEnabled)}",
                 $"tab-stop-off:{bodies.All(b => !b.IsTabStop)}",
-                $"theme-ink:{Colour(bodies[0].Foreground) == ColorOf(theme.Text)}"
+                $"theme-ink:{bodies.All(b => Colour(b.Foreground) == ColorOf(theme.Text))}"
             };
 
             // Both sides: pick a word, see it painted, and the copy command becomes available.
@@ -501,9 +512,9 @@ internal static class LayoutProbe
                 Keyboard.Focus(body);
                 Pump();
 
-                body.Select(0, 4);
+                SelectFirst(body, 4);
                 Pump();
-                checks.Add($"selectable:{body.SelectedText.Length == 4}");
+                checks.Add($"selectable:{SelectionText(body).Length == 4}");
                 checks.Add($"copy-command:{ApplicationCommands.Copy.CanExecute(null, body)}");
                 checks.Add($"sized:{body.ActualWidth > 1 && body.ActualHeight > 1}");
 
@@ -522,8 +533,8 @@ internal static class LayoutProbe
                 checks.Add($"inactive-painted:{inactive > 0}");
             }
 
-            checks.Add($"user-text:{bodies[0].SelectedText == "what"}");
-            checks.Add($"agent-text:{bodies[1].SelectedText == "It s"}");
+            checks.Add($"user-text:{SelectionText(bodies[0]) == "what"}");
+            checks.Add($"agent-text:{SelectionText(bodies[1]) == "It s"}");
 
             var failures = checks.Where(c => c.EndsWith(":False", StringComparison.Ordinal)).ToList();
             if (failures.Count > 0)
@@ -537,6 +548,123 @@ internal static class LayoutProbe
         catch (Exception ex)
         {
             Fail($"chat selection: {ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            result.Close();
+        }
+    }
+
+    /// <summary>
+    /// The agent's replies are Markdown, and the bubble has to *render* them: a model answers with tables,
+    /// lists and fenced code, and showing the source of those is not an answer. The user's own turns stay
+    /// literal — typing <c>**this**</c> must not turn into bold text.
+    /// </summary>
+    private static void ChatMarkdownRendering(AppServices services)
+    {
+        const string reply = """
+        ## Summary
+
+        The invoice lists **four** items:
+
+        | Item | Qty |
+        |:-----|----:|
+        | bolt | 4   |
+        | nut  | 8   |
+
+        - first
+        - second
+
+        ```text
+        total: 12
+        ```
+        """;
+
+        var result = new ResultWindow(services);
+
+        try
+        {
+            result.ShowText("Yuuka", null, activate: false);
+
+            result.RenderConversation(
+            [
+                new ChatTurn(AgentPrompts.UserRole, "**raw** markdown stays literal", "10:00"),
+                new ChatTurn(AgentPrompts.AssistantRole, reply, "10:01")
+            ]);
+            Pump();
+
+            if (result.FindName("AnswerList") is not StackPanel list)
+            {
+                Fail("chat markdown: AnswerList not found");
+                return;
+            }
+
+            var bodies = list.Children.OfType<TextBoxBase>().ToList();
+            var user = bodies.ElementAtOrDefault(0) as TextBox;
+            var agent = bodies.ElementAtOrDefault(1) as RichTextBox;
+
+            if (user is null || agent is null)
+            {
+                Fail($"chat markdown: bodies are {string.Join(",", bodies.Select(b => b.GetType().Name))}, " +
+                     "expected a TextBox then a RichTextBox");
+                return;
+            }
+
+            var document = agent.Document;
+            var visible = DocumentText(document);
+            var tables = InlineDescendants<Table>(document);
+            var heading = document.Blocks.OfType<Paragraph>().FirstOrDefault(p => Text(p).Trim() == "Summary");
+            var code = document.Blocks.OfType<Paragraph>()
+                .FirstOrDefault(p => p.FontFamily.Source.Contains("Consolas", StringComparison.OrdinalIgnoreCase));
+
+            var checks = new List<string>
+            {
+                $"agent-markdown:{agent.IsReadOnly && agent.BorderThickness == new Thickness(0)}",
+                // The user's turn is not parsed: what was typed is what is shown.
+                $"user-literal:{user.Text == "**raw** markdown stays literal"}",
+                $"heading:{heading is not null && heading.FontWeight == FontWeights.Bold}",
+                $"bold:{InlineDescendants<Span>(document).Any(s => s.FontWeight == FontWeights.Bold && Text(s) == "four")}",
+                $"tables:{tables.Count == 1}",
+                $"lists:{InlineDescendants<List>(document).Count == 1}",
+                $"code:{code is not null && Text(code).Contains("total: 12", StringComparison.Ordinal)}",
+                // The rendered document must not leak the source syntax.
+                $"no-pipes:{!visible.Contains("| Item |", StringComparison.Ordinal) && !visible.Contains("|---", StringComparison.Ordinal)}",
+                $"no-hashes:{!visible.Contains("## ", StringComparison.Ordinal) && !visible.Contains("```", StringComparison.Ordinal)}",
+                // A reply grows to its own height instead of being clipped into a default box.
+                $"sized:{agent.ActualHeight > 40}",
+                $"not-scrolled:{agent.ExtentHeight <= agent.ViewportHeight + 0.5}",
+                // A reply with a table needs the whole column: a content-sized box would squeeze it.
+                $"full-width:{agent.ActualWidth >= list.ActualWidth - 2}"
+            };
+
+            if (tables.Count == 1)
+            {
+                var rows = tables[0].RowGroups[0].Rows;
+                checks.Add($"table-columns:{tables[0].Columns.Count == 2}");
+                checks.Add($"table-rows:{rows.Count == 3}");
+                checks.Add($"table-right:{rows[1].Cells[1].TextAlignment == TextAlignment.Right}");
+                checks.Add($"table-cells:{Text(rows[2].Cells[1]).Trim() == "8"}");
+            }
+
+            // Still selectable text: a table cell can be picked and copied like a sentence.
+            SelectText(agent, "bolt");
+            checks.Add($"cell-selectable:{SelectionText(agent).Contains("bolt", StringComparison.Ordinal)}");
+            checks.Add($"copy-command:{ApplicationCommands.Copy.CanExecute(null, agent)}");
+            ClearSelection(agent);
+
+            var failures = checks.Where(c => c.EndsWith(":False", StringComparison.Ordinal)).ToList();
+            if (failures.Count > 0)
+                Fail($"chat markdown: {string.Join(", ", failures)} " +
+                     $"({document.Blocks.Count} blocks, height {agent.ActualHeight:0}, " +
+                     $"extent {agent.ExtentHeight:0}/{agent.ViewportHeight:0}, " +
+                     $"width {agent.ActualWidth:0}/{list.ActualWidth:0})");
+            else
+                Pass($"the agent's replies render Markdown in the chat ({checks.Count} checks, " +
+                     $"{document.Blocks.Count} blocks, {agent.ActualHeight:0} DIP tall)");
+        }
+        catch (Exception ex)
+        {
+            Fail($"chat markdown: {ex.GetType().Name}: {ex.Message}");
         }
         finally
         {
@@ -1206,7 +1334,7 @@ internal static class LayoutProbe
 
             result.ShowText(ocr, null, activate: false);
 
-            if (result.FindName("ResultBox") is not TextBox box ||
+            if (result.FindName("ResultBox") is not TextBoxBase box ||
                 result.FindName("ChatBox") is not TextBox chat ||
                 result.FindName("SendButton") is not Button send ||
                 result.FindName("ScopeText") is not TextBlock scope)
@@ -1231,7 +1359,7 @@ internal static class LayoutProbe
 
             // ---- scope 2: a selection, which must not drag the rest of the result along
             var start = ocr.IndexOf(secondLine, StringComparison.Ordinal);
-            box.Select(start, secondLine.Length);
+            SelectText(box, secondLine);
             Pump();
             checks.Add($"chip-switched:{scope.Text == L.T("result.context.selection")}");
 
@@ -1453,6 +1581,754 @@ internal static class LayoutProbe
         {
             _stop.Cancel();
             try { _listener.Stop(); } catch { /* already stopped */ }
+        }
+    }
+
+    /// <summary>The selected text of either kind of box (the result is a RichTextBox, chat rows are TextBoxes).</summary>
+    private static string SelectionText(TextBoxBase box) => box switch
+    {
+        TextBox text => text.SelectedText,
+        RichTextBox rich => rich.Selection.Text,
+        _ => ""
+    };
+
+    /// <summary>
+    /// Selects the first occurrence of <paramref name="needle"/>, whatever kind of box this is.
+    ///
+    /// Selecting by character offset does not survive the move to a RichTextBox: the document counts
+    /// element boundaries as symbols, so an index into the plain string lands somewhere else. Searching
+    /// the text itself is what the user does with the mouse, and it means the same thing in both boxes.
+    /// </summary>
+    private static void SelectText(TextBoxBase box, string needle)
+    {
+        if (box is TextBox text)
+        {
+            var at = text.Text.IndexOf(needle, StringComparison.Ordinal);
+            if (at >= 0) text.Select(at, needle.Length);
+            return;
+        }
+
+        if (box is not RichTextBox rich) return;
+
+        // Search run by run: an offset inside one Run's own text is the same as the symbol offset the
+        // content model uses, whereas a longer range counts paragraph breaks as symbols and spells them
+        // with two characters, so the selection landed two characters late ("sted item").
+        foreach (var run in InlineDescendants<Run>(rich.Document))
+        {
+            var index = run.Text.IndexOf(needle, StringComparison.Ordinal);
+            if (index < 0) continue;
+
+            var from = run.ContentStart.GetPositionAtOffset(index, LogicalDirection.Forward);
+            var to = from?.GetPositionAtOffset(needle.Length, LogicalDirection.Forward);
+            if (from is not null && to is not null) rich.Selection.Select(from, to);
+            return;
+        }
+
+        // A needle that spans formatting (bold in the middle of a phrase) has no single Run to sit in.
+        var pointer = rich.Document.ContentStart;
+        while (pointer is not null)
+        {
+            if (pointer.GetPointerContext(LogicalDirection.Forward) != TextPointerContext.Text)
+            {
+                pointer = pointer.GetNextContextPosition(LogicalDirection.Forward);
+                continue;
+            }
+
+            var run = pointer.GetTextRunLength(LogicalDirection.Forward);
+            var end = pointer.GetPositionAtOffset(run, LogicalDirection.Forward);
+            if (end is null) return;
+
+            var found = new TextRange(pointer, end).Text.IndexOf(needle, StringComparison.Ordinal);
+            if (found >= 0)
+            {
+                var from = pointer.GetPositionAtOffset(found, LogicalDirection.Forward);
+                var to = from?.GetPositionAtOffset(needle.Length, LogicalDirection.Forward);
+                if (from is not null && to is not null) rich.Selection.Select(from, to);
+                return;
+            }
+
+            pointer = end;
+        }
+    }
+
+    /// <summary>The first <paramref name="length"/> characters of a message body, of either type.</summary>
+    private static void SelectFirst(TextBoxBase box, int length)
+    {
+        if (box is TextBox text)
+        {
+            text.Select(0, Math.Min(length, text.Text.Length));
+            return;
+        }
+
+        if (box is not RichTextBox rich) return;
+
+        // A RichTextBox counts element boundaries as symbols, so "the first 4 characters" has to be
+        // measured from the first run's own text rather than from Document.ContentStart.
+        var run = InlineDescendants<Run>(rich.Document).FirstOrDefault(r => r.Text.Length > 0);
+        if (run is null) return;
+
+        var from = run.ContentStart;
+        var to = from.GetPositionAtOffset(Math.Min(length, run.Text.Length));
+        if (to is not null) rich.Selection.Select(from, to);
+    }
+
+    /// <summary>Empties the selection without touching the document.</summary>
+    private static void ClearSelection(TextBoxBase box)
+    {
+        if (box is TextBox text) text.Select(0, 0);
+        else if (box is RichTextBox rich) rich.Selection.Select(rich.Document.ContentStart, rich.Document.ContentStart);
+    }
+
+    /// <summary>Returns an action that puts the selection back exactly as it was.</summary>
+    private static Action CaptureSelection(TextBoxBase box)
+    {
+        if (box is TextBox text)
+        {
+            var start = text.SelectionStart;
+            var length = text.SelectionLength;
+            return () => text.Select(start, length);
+        }
+
+        if (box is RichTextBox rich)
+        {
+            var from = rich.Selection.Start;
+            var to = rich.Selection.End;
+            return () => rich.Selection.Select(from, to);
+        }
+
+        return () => { };
+    }
+
+    // ------------------------------------------------------ result window: Markdown
+
+    /// <summary>
+    /// The result bubble renders Markdown: a table has to become a real <see cref="Table"/> with the
+    /// alignment the delimiter row asked for, lists have to nest, task boxes have to be visible, and the
+    /// whole thing has to stay selectable text — a picture of a table would look right and be useless.
+    /// </summary>
+    private static void MarkdownRendering(AppServices services)
+    {
+        const string markdown = """
+        # Heading one
+
+        A paragraph with **bold**, *italic*, ~~struck~~, `code` and a [link](https://example.com).
+
+        - first item
+        - second item
+          - nested item
+        - [x] done
+        - [ ] not done
+
+        1. one
+        2. two
+
+        > quoted text
+
+        | Name | Count |
+        |:-----|------:|
+        | a    | 1     |
+        | b    | 2     |
+
+        ```csharp
+        var x = 1;
+        ```
+
+        ---
+        """;
+
+        var result = new ResultWindow(services);
+
+        try
+        {
+            result.ShowText(markdown, null, activate: false);
+            Pump();
+
+            if (result.FindName("ResultBox") is not RichTextBox box)
+            {
+                Fail("markdown: ResultBox is not a RichTextBox");
+                return;
+            }
+
+            var blocks = box.Document.Blocks.ToList();
+            var paragraphs = blocks.OfType<Paragraph>().ToList();
+            var lists = blocks.OfType<List>().ToList();
+            var tables = blocks.OfType<Table>().ToList();
+            var sections = blocks.OfType<Section>().ToList();
+
+            var heading = paragraphs.FirstOrDefault(p => Text(p).Trim() == "Heading one");
+            var body = services.Settings.Settings.Theme.FontSize;
+
+            var code = paragraphs.FirstOrDefault(p =>
+                p.FontFamily.Source.Contains("Consolas", StringComparison.OrdinalIgnoreCase));
+
+            var rule = paragraphs.FirstOrDefault(p => p.BorderThickness.Top > 0 && Text(p).Trim().Length == 0);
+
+            var spans = InlineDescendants<Span>(box.Document);
+            var links = InlineDescendants<Hyperlink>(box.Document).ToList();
+            var struck = spans.Count(s => s.TextDecorations.Count > 0 && Text(s) == "struck");
+
+            var all = DocumentText(box.Document);
+
+            var checks = new List<string>
+            {
+                $"heading:{heading is not null && heading.FontSize > body && heading.FontWeight == FontWeights.Bold}",
+                $"paragraph:{all.Contains("A paragraph with", StringComparison.Ordinal)}",
+                $"bold:{spans.Any(s => s.FontWeight == FontWeights.Bold && Text(s) == "bold")}",
+                $"italic:{spans.Any(s => s.FontStyle == FontStyles.Italic && Text(s) == "italic")}",
+                $"struck:{struck == 1}",
+                $"inline-code:{InlineDescendants<Run>(box.Document).Any(r => r.Text == "code" && r.FontFamily.Source.Contains("Consolas", StringComparison.OrdinalIgnoreCase))}",
+                $"link:{links.Count == 1 && links[0].NavigateUri?.Host == "example.com"}",
+                $"lists:{lists.Count == 2}",
+                $"bullets:{lists.Count == 2 && lists[0].MarkerStyle == TextMarkerStyle.Disc}",
+                $"numbers:{lists.Count == 2 && lists[1].MarkerStyle == TextMarkerStyle.Decimal && lists[1].StartIndex == 1}",
+                $"items:{lists.Count == 2 && lists[0].ListItems.Count == 4}",
+                $"nested:{lists.Count == 2 && lists[0].ListItems.ElementAt(1).Blocks.OfType<List>().Count() == 1}",
+                $"task-boxes:{all.Contains('☑') && all.Contains('☐')}",
+                $"quote:{sections.Count == 1 && sections[0].BorderThickness.Left > 0 && Text(sections[0]).Contains("quoted text", StringComparison.Ordinal)}",
+                $"code-block:{code is not null && Text(code).Contains("var x = 1;", StringComparison.Ordinal) && code.Background is not null}",
+                $"rule:{rule is not null}",
+                $"tables:{tables.Count == 1}"
+            };
+
+            if (tables.Count == 1)
+            {
+                var table = tables[0];
+                var rows = table.RowGroups[0].Rows;
+
+                checks.Add($"table-columns:{table.Columns.Count == 2}");
+                checks.Add($"table-rows:{rows.Count == 3}");
+                checks.Add($"table-header:{rows[0].Cells[0].Background is not null}");
+                checks.Add($"table-right:{rows[1].Cells[1].TextAlignment == TextAlignment.Right}");
+                checks.Add($"table-left:{rows[1].Cells[0].TextAlignment == TextAlignment.Left}");
+                checks.Add($"table-cells:{Text(rows[2].Cells[1]).Trim() == "2"}");
+            }
+
+            // Every piece has to be reachable by the mouse: selecting inside the table and the quote is
+            // what the user does before pressing the floating copy button.
+            SelectText(box, "quoted text");
+            checks.Add($"quote-selectable:{SelectionText(box).Contains("quoted text", StringComparison.Ordinal)}");
+
+            SelectText(box, "nested item");
+            var nestedSelection = SelectionText(box);
+            checks.Add($"list-selectable:{nestedSelection.Contains("nested item", StringComparison.Ordinal)}");
+
+            ClearSelection(box);
+
+            var failures = checks.Where(c => c.EndsWith(":False", StringComparison.Ordinal)).ToList();
+            if (failures.Count > 0)
+                Fail($"markdown: {string.Join(", ", failures)} ({blocks.Count} blocks, selection \"{nestedSelection}\")");
+            else
+                Pass($"the result bubble renders Markdown ({checks.Count} checks, {blocks.Count} blocks)");
+        }
+        catch (Exception ex)
+        {
+            Fail($"markdown: {ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            result.Close();
+        }
+    }
+
+    /// <summary>Plain text of a text element, so a test can assert on what the user would read.</summary>
+    private static string Text(TextElement element) =>
+        new TextRange(element.ContentStart, element.ContentEnd).Text;
+
+    private static string DocumentText(FlowDocument document) =>
+        new TextRange(document.ContentStart, document.ContentEnd).Text;
+
+    /// <summary>
+    /// Every descendant of a given inline/block type. A <see cref="FlowDocument"/> is a content tree, not
+    /// a visual one — <see cref="VisualTreeHelper"/> sees nothing under it — so it is walked by hand.
+    /// </summary>
+    private static List<T> InlineDescendants<T>(FlowDocument document) where T : TextElement
+    {
+        var found = new List<T>();
+        foreach (var block in document.Blocks) Walk(block, found);
+        return found;
+    }
+
+    private static void Walk<T>(TextElement element, List<T> found) where T : TextElement
+    {
+            if (element is T match) found.Add(match);
+
+            switch (element)
+            {
+                case Section section:
+                    foreach (var block in section.Blocks) Walk(block, found);
+                    break;
+                case Paragraph paragraph:
+                    foreach (var inline in paragraph.Inlines) Walk(inline, found);
+                    break;
+                case List list:
+                    foreach (var item in list.ListItems) Walk(item, found);
+                    break;
+                case ListItem listItem:
+                    foreach (var block in listItem.Blocks) Walk(block, found);
+                    break;
+                case Table table:
+                    foreach (var group in table.RowGroups) Walk(group, found);
+                    break;
+                case TableRowGroup group:
+                    foreach (var row in group.Rows) Walk(row, found);
+                    break;
+                case TableRow row:
+                    foreach (var cell in row.Cells) Walk(cell, found);
+                    break;
+                case TableCell cell:
+                    foreach (var block in cell.Blocks) Walk(block, found);
+                    break;
+                case Span span:
+                    foreach (var inline in span.Inlines) Walk(inline, found);
+                    break;
+            }
+    }
+
+    // --------------------------------------------------- result window: minimum width
+
+    /// <summary>
+    /// *Layout → Spacing &amp; Size → Minimum width* has to change the bubble. It used to do nothing at all:
+    /// the window was pinned to 620 + padding whatever the setting said, so the whole 120…600 slider was
+    /// dead. Now the text decides the natural width, the setting raises the floor, and the ceiling still
+    /// stops one very long OCR line from producing a window wider than the screen.
+    /// </summary>
+    private static void MinimumWidthDrivesTheBubble(AppServices services)
+    {
+        var settings = services.Settings;
+        var originalMinimum = settings.Settings.MinSubWindowWidth;
+        var originalScale = settings.Settings.UiScale;
+        var savedSizes = new Dictionary<string, WindowSize>(settings.Settings.WindowSizes);
+
+        // A remembered size would win over the minimum by design, so start from "never resized" — and do
+        // it before the window is built, because the constructor is where the size is restored.
+        settings.Update(s =>
+        {
+            s.WindowSizes.Remove(WindowSizeKeys.Result);
+            s.UiScale = 100;
+            s.MinSubWindowWidth = 200;
+        });
+
+        var result = new ResultWindow(services);
+
+        try
+        {
+            result.ShowText("Yuuka", null, activate: false);
+            Pump();
+            var atDefault = result.Width;
+
+            settings.Update(s => s.MinSubWindowWidth = 600);
+            Pump();
+            var atWide = result.Width;
+
+            settings.Update(s => s.MinSubWindowWidth = 120);
+            Pump();
+            var atNarrow = result.Width;
+
+            // A long line wants more room than the natural width allows.
+            result.ShowText(new string('W', 300), null, activate: false);
+            Pump();
+            var longLine = result.Width;
+
+            // The floor still holds when the user drags smaller than the setting.
+            settings.Update(s => s.MinSubWindowWidth = 400);
+            Pump();
+            var floor = result.MinWidth;
+
+            var checks = new List<string>
+            {
+                $"default:{Math.Abs(atDefault - 244) < 1.5}",
+                $"wider:{Math.Abs(atWide - 644) < 1.5}",
+                $"narrower:{Math.Abs(atNarrow - 164) < 1.5}",
+                $"grows:{atWide > atDefault && atDefault > atNarrow}",
+                $"capped:{Math.Abs(longLine - 664) < 1.5}",
+                $"floor:{Math.Abs(floor - 444) < 1.5}"
+            };
+
+            var failures = checks.Where(c => c.EndsWith(":False", StringComparison.Ordinal)).ToList();
+            if (failures.Count > 0)
+                Fail($"minimum width: {string.Join(", ", failures)} " +
+                     $"(120={atNarrow:0}, 200={atDefault:0}, 600={atWide:0}, long={longLine:0}, floor={floor:0})");
+            else
+                Pass($"the minimum-width slider sets the bubble width ({atNarrow:0}/{atDefault:0}/{atWide:0}, " +
+                     $"long line capped at {longLine:0})");
+        }
+        catch (Exception ex)
+        {
+            Fail($"minimum width: {ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            result.Close();
+
+            settings.Update(s =>
+            {
+                s.MinSubWindowWidth = originalMinimum;
+                s.UiScale = originalScale;
+            });
+
+            settings.Settings.WindowSizes.Clear();
+            foreach (var pair in savedSizes) settings.Settings.WindowSizes[pair.Key] = pair.Value;
+        }
+    }
+
+    // ----------------------------------------------------------- window sizes remembered
+
+    /// <summary>
+    /// Every window remembers the size the user dragged out. Size only — never the position, because each
+    /// window places itself and a remembered position would fight that.
+    /// </summary>
+    private static void WindowSizeMemoryRoundTrip(AppServices services)
+    {
+        var settings = services.Settings;
+        var savedSizes = new Dictionary<string, WindowSize>(settings.Settings.WindowSizes);
+        const string key = "probe-window";
+
+        var first = new Window
+        {
+            Width = 500,
+            Height = 300,
+            WindowStyle = WindowStyle.None,
+            ShowInTaskbar = false,
+            ShowActivated = false,
+            Left = -6000,
+            Top = -6000
+        };
+
+        var second = new Window
+        {
+            Width = 200,
+            Height = 200,
+            WindowStyle = WindowStyle.None,
+            ShowInTaskbar = false,
+            ShowActivated = false,
+            Left = -6000,
+            Top = -6000
+        };
+
+        try
+        {
+            settings.Settings.WindowSizes.Remove(key);
+            first.Show();
+            Pump();
+
+            // Nothing remembered yet: a caller must be able to tell, so it can pick its own default.
+            var restoredNothing = WindowSizeMemory.Restore(second, services, key);
+
+            WindowSizeMemory.Remember(services, key, first.Width, first.Height);
+
+            var stored = settings.Settings.SizeOf(key);
+            var restored = WindowSizeMemory.Restore(second, services, key);
+            Pump();
+
+            var checks = new List<string>
+            {
+                $"empty-first:{!restoredNothing}",
+                $"stored:{stored is not null && Math.Abs(stored.Width - 500) < 0.5 && Math.Abs(stored.Height - 300) < 0.5}",
+                $"restored:{restored && Math.Abs(second.Width - 500) < 0.5 && Math.Abs(second.Height - 300) < 0.5}",
+                $"position-kept:{Math.Abs(second.Left - (-6000)) < 0.5}",
+                // A size from a monitor that is no longer there must not open a window off screen.
+                $"fitted:{second.Width <= SystemParameters.WorkArea.Width && second.Height <= SystemParameters.WorkArea.Height}"
+            };
+
+            var failures = checks.Where(c => c.EndsWith(":False", StringComparison.Ordinal)).ToList();
+            if (failures.Count > 0)
+                Fail($"window sizes: {string.Join(", ", failures)} " +
+                     $"(stored {stored?.Width:0}x{stored?.Height:0}, restored {second.Width:0}x{second.Height:0})");
+            else
+                Pass($"a dragged size is stored and restored ({second.Width:0}x{second.Height:0}, position untouched)");
+        }
+        catch (Exception ex)
+        {
+            Fail($"window sizes: {ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            first.Close();
+            second.Close();
+
+            settings.Settings.WindowSizes.Clear();
+            foreach (var pair in savedSizes) settings.Settings.WindowSizes[pair.Key] = pair.Value;
+        }
+    }
+
+    // ------------------------------------------------------------------ resize handles
+
+    /// <summary>
+    /// A borderless window has no OS resize border, so the handles are ours: eight of them, sitting on the
+    /// visible card edge rather than out in the transparent shadow padding, each with the cursor a desktop
+    /// window would show.
+    /// </summary>
+    private static void ResizeHandles()
+    {
+        const double pad = 30;
+
+        var overlay = new Grid();
+        var card = new Border
+        {
+            Margin = new Thickness(pad),
+            Background = Brushes.Black,
+            CornerRadius = new CornerRadius(12)
+        };
+
+        overlay.Children.Add(card);
+
+        var window = new Window
+        {
+            Width = 700,
+            Height = 500,
+            WindowStyle = WindowStyle.None,
+            AllowsTransparency = true,
+            Background = Brushes.Transparent,
+            ShowInTaskbar = false,
+            ShowActivated = false,
+            WindowStartupLocation = WindowStartupLocation.Manual,
+            Left = -6000,
+            Top = -6000,
+            Content = overlay
+        };
+
+        try
+        {
+            window.Show();
+            Pump();
+
+            ResizeGrips.Attach(window, overlay, card);
+            Pump();
+
+            var grips = overlay.Children.OfType<Border>().Where(b => b != card).ToList();
+            var expected = new Dictionary<YuukaOCR.Core.Ui.ResizeEdge, Cursor>
+            {
+                [YuukaOCR.Core.Ui.ResizeEdge.TopLeft] = Cursors.SizeNWSE,
+                [YuukaOCR.Core.Ui.ResizeEdge.TopRight] = Cursors.SizeNESW,
+                [YuukaOCR.Core.Ui.ResizeEdge.BottomLeft] = Cursors.SizeNESW,
+                [YuukaOCR.Core.Ui.ResizeEdge.BottomRight] = Cursors.SizeNWSE,
+                [YuukaOCR.Core.Ui.ResizeEdge.Left] = Cursors.SizeWE,
+                [YuukaOCR.Core.Ui.ResizeEdge.Right] = Cursors.SizeWE,
+                [YuukaOCR.Core.Ui.ResizeEdge.Top] = Cursors.SizeNS,
+                [YuukaOCR.Core.Ui.ResizeEdge.Bottom] = Cursors.SizeNS
+            };
+
+            var checks = new List<string> { $"count:{grips.Count == 8}" };
+
+            foreach (var pair in expected)
+            {
+                var grip = grips.FirstOrDefault(g => g.Tag is YuukaOCR.Core.Ui.ResizeEdge edge && edge == pair.Key);
+                checks.Add($"{pair.Key}-present:{grip is not null}");
+                if (grip is null) continue;
+
+                checks.Add($"{pair.Key}-cursor:{grip.Cursor == pair.Value}");
+                // A null background is not hit-testable, so the handle would be invisible and dead.
+                checks.Add($"{pair.Key}-hittable:{grip.Background is not null && grip.IsHitTestVisible}");
+
+                var box = Bounds(grip, window);
+                var cardBox = Bounds(card, window);
+
+                // Corners must sit on the card's own corner; edges on the card's own edge.
+                var onLeft = pair.Key is YuukaOCR.Core.Ui.ResizeEdge.TopLeft
+                    or YuukaOCR.Core.Ui.ResizeEdge.BottomLeft
+                    or YuukaOCR.Core.Ui.ResizeEdge.Left;
+
+                var aligned = onLeft
+                    ? Math.Abs(box.Left - cardBox.Left) < 0.6
+                    : Math.Abs(box.Right - cardBox.Right) < 0.6;
+
+                if (pair.Key is YuukaOCR.Core.Ui.ResizeEdge.Left or YuukaOCR.Core.Ui.ResizeEdge.Right)
+                    aligned &= Math.Abs(box.Top - (cardBox.Top + 16)) < 0.6;
+                else if (pair.Key is YuukaOCR.Core.Ui.ResizeEdge.Top or YuukaOCR.Core.Ui.ResizeEdge.Bottom)
+                    aligned &= Math.Abs(box.Left - (cardBox.Left + 16)) < 0.6;
+
+                checks.Add($"{pair.Key}-on-edge:{aligned}{(aligned ? "" : $" [{box.Left:0.#},{box.Top:0.#} {box.Width:0.#}x{box.Height:0.#} vs card {cardBox.Left:0.#},{cardBox.Top:0.#} {cardBox.Width:0.#}x{cardBox.Height:0.#}]")}");
+                checks.Add($"{pair.Key}-grab:{box.Width >= 5.5 && box.Height >= 5.5}");
+            }
+
+            var failures = checks.Where(c => c.EndsWith(":False", StringComparison.Ordinal)).ToList();
+            if (failures.Count > 0)
+                Fail($"resize handles: {string.Join(", ", failures)} ({grips.Count} handles)");
+            else
+                Pass($"eight resize handles sit on the card edge with the right cursors ({checks.Count} checks)");
+        }
+        catch (Exception ex)
+        {
+            Fail($"resize handles: {ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    /// <summary>An element's rectangle in window coordinates.</summary>
+    private static Rect Bounds(FrameworkElement element, Visual root)
+    {
+        var origin = element.TransformToAncestor(root).Transform(new Point(0, 0));
+        return new Rect(origin, new Size(element.ActualWidth, element.ActualHeight));
+    }
+
+    // ------------------------------------------------------- settings window geometry
+
+    /// <summary>
+    /// The settings window resizes like a desktop window and its content follows: the tab strip takes the
+    /// new width, and the full-text editor is exactly the same rectangle — the editor stands in for the
+    /// window while it is open, so it may not be a pixel larger or smaller.
+    /// </summary>
+    private static void SettingsWindowGeometry(AppServices services)
+    {
+        var config = new ConfigWindow(services);
+        FullTextWindow? editor = null;
+
+        try
+        {
+            config.WindowStartupLocation = WindowStartupLocation.Manual;
+            config.Left = -6000;
+            config.Top = -6000;
+            config.Show();
+            Pump();
+
+            var chrome = (FrameworkElement)config.FindName("Chrome");
+            var tabs = (TabControl)config.FindName("Tabs");
+            var narrow = tabs.ActualWidth;
+
+            config.Width = 1500;
+            Pump();
+            var wide = tabs.ActualWidth;
+
+            editor = new FullTextWindow(services, "Full text", "line one\nline two", readOnly: false);
+            editor.Show();
+            Pump();
+            editor.PlaceOver(config);
+            Pump();
+
+            var editorChrome = (FrameworkElement)editor.FindName("Chrome");
+
+            var checks = new List<string>
+            {
+                $"topmost:{config.Topmost && editor.Topmost}",
+                $"resizable:{config.ResizeMode == ResizeMode.CanResize && editor.ResizeMode == ResizeMode.CanResize}",
+                $"handles:{config.FindName("Overlay") is Grid overlay && overlay.Children.OfType<Border>().Any(b => b.Tag is YuukaOCR.Core.Ui.ResizeEdge)}",
+                // The content follows the window instead of staying at its old width.
+                $"content-follows:{wide - narrow > 400}",
+                $"no-scroll:{wide > narrow && tabs.ActualWidth < config.ActualWidth}",
+                // Same rectangle, same shadow padding, so the cards line up too.
+                $"same-width:{Math.Abs(editor.Width - config.ActualWidth) < 0.5}",
+                $"same-height:{Math.Abs(editor.Height - config.ActualHeight) < 0.5}",
+                $"same-left:{Math.Abs(editor.Left - config.Left) < 0.5}",
+                $"same-top:{Math.Abs(editor.Top - config.Top) < 0.5}",
+                $"same-card:{editorChrome.Margin == chrome.Margin && editorChrome.Margin.Left == 30}"
+            };
+
+            var failures = checks.Where(c => c.EndsWith(":False", StringComparison.Ordinal)).ToList();
+            if (failures.Count > 0)
+                Fail($"settings window: {string.Join(", ", failures)} " +
+                     $"(tabs {narrow:0} -> {wide:0}, editor {editor.Width:0}x{editor.Height:0}, " +
+                     $"settings {config.ActualWidth:0}x{config.ActualHeight:0})");
+            else
+                Pass($"the settings window resizes with its content and the editor matches it " +
+                     $"({config.ActualWidth:0}x{config.ActualHeight:0}, tabs {narrow:0} -> {wide:0})");
+        }
+        catch (Exception ex)
+        {
+            Fail($"settings window: {ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            editor?.Close();
+            config.Close();
+        }
+    }
+
+    // ------------------------------------------------- prompt/agent editing survives
+
+    /// <summary>
+    /// The reported bug: type into *Actions → Action Instruction*, click any icon button, and the field
+    /// snaps back to its default. The icon buttons are <c>Focusable=False</c> by design, so the box never
+    /// loses focus and the old save-on-lost-focus path never ran; the rebuild then read the *stored* value
+    /// back into the box. Both halves are asserted here: what the box shows, and what got saved.
+    /// </summary>
+    private static void PromptEditsSurviveIconClicks(AppServices services)
+    {
+        var settings = services.Settings;
+        var savedActions = settings.Settings.Actions.Select(a => a.Clone()).ToList();
+
+        var config = new ConfigWindow(services);
+
+        try
+        {
+            config.WindowStartupLocation = WindowStartupLocation.Manual;
+            config.Left = -6000;
+            config.Top = -6000;
+            config.Show();
+            Pump();
+
+            if (config.FindName("PromptPanel") is not PromptAgentTab panel)
+            {
+                Fail("prompt edits: PromptPanel not found");
+                return;
+            }
+
+            var instruction = (TextBox)panel.FindName("ActionInstructionBox");
+            var name = (TextBox)panel.FindName("ActionNameBox");
+            var icons = (WrapPanel)panel.FindName("IconPicker");
+
+            var action = settings.Settings.Actions[0];
+            var beforeIcon = action.Icon;
+            var icon = icons.Children.OfType<Button>().FirstOrDefault(b => b.Tag is string tag && tag != beforeIcon)
+                       ?? icons.Children.OfType<Button>().FirstOrDefault();
+
+            if (icon is null)
+            {
+                Fail("prompt edits: no icon button to click");
+                return;
+            }
+
+            const string custom = "Answer in one short line, in Japanese.";
+
+            // The user types — no focus events, exactly like a paste into the box.
+            instruction.Text = custom;
+            name.Text = "Summarise";
+
+            // …then clicks an icon. This rebuilds the tab strip and the editors from settings.
+            icon.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent, icon));
+            Pump();
+
+            var storedInstruction = settings.Settings.Actions.First(a => a.Id == action.Id).Instruction;
+            var storedName = settings.Settings.Actions.First(a => a.Id == action.Id).Name;
+
+            var checks = new List<string>
+            {
+                $"box-kept:{instruction.Text == custom}",
+                $"saved:{storedInstruction == custom}",
+                $"name-kept:{name.Text == "Summarise"}",
+                $"name-saved:{storedName == "Summarise"}",
+                $"icon-applied:{settings.Settings.Actions.First(a => a.Id == action.Id).Icon != beforeIcon}"
+            };
+
+            // Closing the window is the other way out: it must commit too, not drop the edit.
+            instruction.Text = custom + " (edited)";
+            config.Close();
+            Pump();
+
+            var afterClose = settings.Settings.Actions.First(a => a.Id == action.Id).Instruction;
+            checks.Add($"saved-on-close:{afterClose == custom + " (edited)"}");
+
+            var failures = checks.Where(c => c.EndsWith(":False", StringComparison.Ordinal)).ToList();
+            if (failures.Count > 0)
+                Fail($"prompt edits: {string.Join(", ", failures)} (stored \"{storedInstruction}\")");
+            else
+                Pass($"typing survives an icon click and a window close ({checks.Count} checks)");
+        }
+        catch (Exception ex)
+        {
+            Fail($"prompt edits: {ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            config.Close();
+
+            settings.Update(s =>
+            {
+                s.Actions.Clear();
+                s.Actions.AddRange(savedActions);
+            });
         }
     }
 
